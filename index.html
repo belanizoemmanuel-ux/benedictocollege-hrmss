@@ -93,7 +93,7 @@
     }
     .auth-form-panel::before {
       content: ""; position: absolute; inset: -20px;
-      background: url('public/benedicto.jpg') center/cover no-repeat;
+      background: url('/public/benedicto.jpg') center/cover no-repeat;
       filter: blur(9px) saturate(1.1);
       opacity: 0.45; z-index: 0;
     }
@@ -835,7 +835,7 @@
   <div class="toast" id="toast"></div>
 
   <div id="loginTransition">
-    <div class="lt-badge"><img src="public/image.jpg.png" alt="Benedicto College" /></div>
+    <div class="lt-badge"><img src="/public/logo.png" onerror="if(!this.dataset.t){this.dataset.t=1;this.src='/logo.png'}" alt="Benedicto College" /></div>
     <div class="lt-text">Signing you in…</div>
   </div>
 
@@ -1185,7 +1185,7 @@ window.sidebarQuickAttendance = async function(kind) {
     <div class="auth-page">
       <div class="auth-brand-panel">
         <div class="auth-brand-content">
-          <div class="auth-logo-circle"><img src="public/image.jpg.png" alt="Benedicto College Logo" /></div>
+          <div class="auth-logo-circle"><img src="/public/logo.png" onerror="if(!this.dataset.t){this.dataset.t=1;this.src='/logo.png'}" alt="Benedicto College Logo" /></div>
           <div class="auth-brand-name">BENEDICTO<br/>COLLEGE</div>
           <div class="auth-brand-tagline">MAIN CAMPUS</div>
           <h1 class="auth-hero-title">BENEDUPORTAL</h1>
@@ -2620,7 +2620,7 @@ window.sidebarQuickAttendance = async function(kind) {
         </head>
         <body>
           <div class="header">
-            <img src="public/image.jpg.png" alt="Benedicto College" />
+            <img src="/public/logo.png" onerror="if(!this.dataset.t){this.dataset.t=1;this.src='/logo.png'}" alt="Benedicto College" />
             <h1>BENEDICTO COLLEGE</h1>
             <h2>Department Roster — ${name}</h2>
             <p>Benedicto Portal — HR Management System</p>
@@ -2718,7 +2718,7 @@ window.sidebarQuickAttendance = async function(kind) {
         </head>
         <body>
           <div class="header">
-            <img src="public/image.jpg.png" alt="Benedicto College" />
+            <img src="/public/logo.png" onerror="if(!this.dataset.t){this.dataset.t=1;this.src='/logo.png'}" alt="Benedicto College" />
             <h1>BENEDICTO COLLEGE</h1>
             <h2>Full Department Roster</h2>
             <p>Benedicto Portal — HR Management System</p>
@@ -5308,7 +5308,7 @@ function announcementsReportBodyHTML() {
         </head>
         <body>
           <div class="header">
-            <img src="public/image.jpg.png" alt="Benedicto College" />
+            <img src="/public/logo.png" onerror="if(!this.dataset.t){this.dataset.t=1;this.src='/logo.png'}" alt="Benedicto College" />
             <h1>BENEDICTO COLLEGE</h1>
             <h2>${rt.label}</h2>
             <p>Benedicto Portal — HR Management System</p>
