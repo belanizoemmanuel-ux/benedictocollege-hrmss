@@ -1,11 +1,12 @@
+
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "benedicto-hr-system",
+  "name": "benedictocollege-hrmss",
   "compatibility_date": "2026-08-20",
   "observability": {
     "enabled": true
   },
   "assets": {
-    "directory": "."
+    "directory": "./public"
   }
 }
