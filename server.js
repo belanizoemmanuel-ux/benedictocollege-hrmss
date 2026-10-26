@@ -441,7 +441,8 @@ app.post('/api/auth/login', async (req, res) => {
       user: { name: user.name, email: user.email, role: user.role, phone: user.phone, position: user.position, photo: user.photo },
       token: 'demo-token-' + user._id
     });
-  } catch (error) {
+    } catch (error) {
+    console.error('Login error:', error.message);
     res.status(500).json({ error: 'Login failed' });
   }
 });
