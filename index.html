@@ -746,6 +746,12 @@
 .sb-clock { font-family: 'Poppins', sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 0.5px; color: #fff; }
 .sb-ampm { font-size: 10px; font-weight: 700; color: var(--gold); letter-spacing: 1.4px; }
 .sb-date { text-align: center; font-size: 10px; color: rgba(255,255,255,0.55); margin-bottom: 10px; font-weight: 500; }
+ 
+.college-mini-card.dept-inactive { opacity: 0.6; filter: grayscale(0.4); }
+.cmc-inactive-badge { display: inline-block; background: #fde7e6; color: #b3271f; font-size: 9.5px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; padding: 2px 8px; border-radius: 20px; margin-right: 6px; }
+.btn-amber { background: var(--amber); color: #fff; }
+.box-roster-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
   </style>
 <base target="_blank">
 </head>
@@ -5795,6 +5801,163 @@ window.saveBiometricPhotoRows = async function() {
   }
 };
 // ═══════════ END ATTACH ANY PHOTO ═══════════
+
+// ═══════════ DEPARTMENT: RENAME / INACTIVE / REMOVE ═══════════
+function deptCardHTML(d) {
+  const isSynthetic = !!d.isSynthetic;
+  const isSelected = selectedDeptCard === d.name;
+  const isInactive = !isSynthetic && (d.status || 'Active') === 'Inactive';
+  const displayName = isSynthetic ? d.displayName : d.name;
+  const displayHead = isSynthetic ? d.headName : getDeptDisplayHead(d);
+  const count = isSynthetic ? d.count : (d.count || 0);
+  const detailText = isSynthetic ? d.detail : (d.detail || 'No description yet.');
+  return `
+    <div class="college-mini-card ${isSynthetic ? 'facilities-card' : ''} ${isSelected ? 'selected' : ''} ${isInactive ? 'dept-inactive' : ''}" onclick="selectDeptCard('${d.name.replace(/'/g,"\\'")}')">
+      <div class="cmc-head">
+        <div class="cmc-icon"><i class="fas ${isSynthetic ? 'fa-broom' : 'fa-graduation-cap'}"></i></div>
+        <div style="flex:1;min-width:0;">
+          <div class="cmc-name">${escBio(displayName)}</div>
+          <div class="cmc-tag">${isInactive ? '<span class="cmc-inactive-badge">Inactive</span>' : ''}${displayHead ? 'Head: ' + escBio(displayHead) : (isSynthetic ? 'Non-Teaching Staff' : 'Academic College')}</div>
+        </div>
+      </div>
+      <div class="cmc-detail">${escBio(detailText)}</div>
+      <div class="cmc-foot">
+        <span class="cmc-count">${count}</span>
+        <span class="cmc-foot-label">employee(s) — click to manage</span>
+      </div>
+    </div>`;
+}
+
+function deptRosterPanelHTML() {
+  const isSynthetic = selectedDeptCard === NON_TEACHING_KEY;
+  const d = isSynthetic ? nonTeachingBoxData() : departments.find(x => x.name === selectedDeptCard);
+  if (!d) return '';
+  const staff = isSynthetic ? d.staff : employees.filter(e => e.department === selectedDeptCard);
+  const headerName = isSynthetic ? d.displayName : selectedDeptCard;
+  const isInactive = !isSynthetic && (d.status || 'Active') === 'Inactive';
+  const jsName = String(headerName).replace(/'/g, "\\'");
+  return `
+    <div class="box-roster-panel ${isSynthetic ? 'facilities' : ''}" id="deptRosterPanel">
+      <div class="box-roster-head">
+        <div class="box-roster-icon"><i class="fas ${isSynthetic ? 'fa-broom' : 'fa-graduation-cap'}"></i></div>
+        <div style="flex:1;min-width:0;">
+          <h3>${escBio(headerName)} ${isInactive ? '<span class="cmc-inactive-badge">Inactive</span>' : ''}</h3>
+          <p>${staff.length} employee(s) — manage this department or its members below</p>
+        </div>
+        <div class="box-roster-actions">
+          ${isSynthetic ? '' : `
+            <button class="btn btn-outline btn-sm" onclick="editDepartment('${jsName}')"><i class="fas fa-pen"></i> Rename / Edit</button>
+            <button class="btn ${isInactive ? 'btn-green' : 'btn-amber'} btn-sm" onclick="toggleDepartmentStatus('${jsName}')"><i class="fas ${isInactive ? 'fa-circle-check' : 'fa-ban'}"></i> ${isInactive ? 'Set Active' : 'Set Inactive'}</button>
+            <button class="btn btn-red btn-sm" onclick="deleteDepartment('${jsName}')"><i class="fas fa-trash"></i> Remove</button>
+          `}
+          <button class="btn btn-navy btn-sm" title="Add an existing employee to this group" onclick="showAssignToDeptModal()"><i class="fas fa-user-plus"></i> Add Employee</button>
+        </div>
+        <button class="box-roster-close" onclick="selectDeptCard(null)"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="dept-member-list">
+        ${staff.length ? staff.map(e => `
+          <div class="dept-member-row">
+            <div style="min-width:0;">
+              <div class="dept-member-name">${escBio(e.first)} ${escBio(e.last)}</div>
+              <div class="dept-member-role">${escBio(e.position || 'No role set')}</div>
+            </div>
+            <button class="btn btn-outline btn-sm" title="Remove from ${escBio(headerName)}" onclick="removeFromDept('${e.id}','${jsName}')"><i class="fas fa-user-minus"></i></button>
+          </div>
+        `).join('') : '<div class="empty-state" style="padding:20px;"><p>No employees assigned yet.</p></div>'}
+      </div>
+    </div>
+  `;
+}
+
+window.editDepartment = function(name) {
+  const d = departments.find(x => x.name === name);
+  if (!d) return;
+  const jsName = d.name.replace(/'/g, "\\'");
+  openModal(`
+    <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+    <h2 style="margin-top:0;">Edit Department</h2>
+    <div class="field"><label>Department Name (rename it to something friendlier)</label><input id="ed_name" type="text" value="${escBio(d.name)}" /></div>
+    <div class="field"><label>Department Head</label><input id="ed_head" type="text" value="${escBio(d.head || '')}" placeholder="e.g. Dr. Juan Dela Cruz" /></div>
+    <div class="field"><label>Description</label><input id="ed_detail" type="text" value="${escBio(d.detail || '')}" /></div>
+    <div class="field"><label>Status</label>
+      <select id="ed_status"><option ${d.status==='Active'?'selected':''}>Active</option><option ${d.status==='Inactive'?'selected':''}>Inactive</option></select>
+    </div>
+    <p style="font-size:11.5px;color:var(--sub);margin:4px 0 0;">Renaming updates every employee, attendance record, leave request and report that uses this department.</p>
+    <div style="display:flex;gap:10px;margin-top:14px;">
+      <button class="btn btn-outline" style="flex:1" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-navy" style="flex:1" onclick="saveDepartmentEdit('${jsName}')"><i class="fas fa-save"></i> Save Changes</button>
+    </div>
+  `);
+};
+
+window.saveDepartmentEdit = async function(oldName) {
+  const newName = document.getElementById('ed_name').value.trim();
+  if (!newName) { showToast('Department name cannot be empty', 'fa-triangle-exclamation'); return; }
+  const payload = {
+    newName,
+    head: document.getElementById('ed_head').value.trim() || 'Not Assigned',
+    detail: document.getElementById('ed_detail').value.trim(),
+    status: document.getElementById('ed_status').value
+  };
+  try {
+    const res = await fetch(`${API_BASE_URL}/departments/${encodeURIComponent(oldName)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to update department', 'fa-triangle-exclamation'); return; }
+    if (selectedDeptCard === oldName) selectedDeptCard = newName;
+    await reloadAndRender();
+    closeModal();
+    showToast(newName !== oldName ? `Renamed to "${newName}"` : 'Department updated!');
+  } catch (err) {
+    showToast('Failed to update department', 'fa-triangle-exclamation');
+  }
+};
+
+window.toggleDepartmentStatus = async function(name) {
+  const d = departments.find(x => x.name === name);
+  if (!d) return;
+  const next = (d.status || 'Active') === 'Active' ? 'Inactive' : 'Active';
+  if (next === 'Inactive' && !confirm(`Set "${name}" to Inactive? Its employees stay assigned, but the department will be marked inactive.`)) return;
+  try {
+    const res = await fetch(`${API_BASE_URL}/departments/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: next })
+    });
+    if (!res.ok) { showToast('Failed to change status', 'fa-triangle-exclamation'); return; }
+    await reloadAndRender();
+    showToast(`${name} is now ${next}`);
+  } catch (err) {
+    showToast('Failed to change status', 'fa-triangle-exclamation');
+  }
+};
+
+window.deleteDepartment = async function(name) {
+  const count = employees.filter(e => e.department === name).length;
+  const msg = count
+    ? `Remove "${name}"? Its ${count} employee(s) will become Unassigned (their records are kept). This cannot be undone.`
+    : `Remove "${name}"? This cannot be undone.`;
+  if (!confirm(msg)) return;
+  try {
+    const res = await fetch(`${API_BASE_URL}/departments/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      const hint = res.status === 404 ? ' (server not updated — restart/redeploy server.js)' : '';
+      showToast((data.error || 'Failed to remove department') + ' [' + res.status + ']' + hint, 'fa-triangle-exclamation');
+      return;
+    }
+    selectedDeptCard = null;
+    await reloadAndRender();
+    showToast(`"${name}" removed`);
+  } catch (err) {
+    showToast('Cannot reach the server — is it running?', 'fa-triangle-exclamation');
+  }
+};
+// ═══════════ END DEPARTMENT ACTIONS ═══════════
 
     (async function boot() {
       const storedUser = localStorage.getItem('bc_user');

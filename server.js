@@ -248,13 +248,17 @@ async function seed() {
       { name: 'Engineering Department', detail: 'Industrial, Mechanical, Civil, Electrical, Electronics Engineering', status: 'Active', group: 'academic', head: 'Not Assigned' },
       { name: 'Educational Department', detail: 'Elementary Education, Secondary Education, Early Childhood', status: 'Active', group: 'academic', head: 'Not Assigned' }
     ];
-    for (const dept of desiredDepartments) {
-      await Department.updateOne(
-        { name: dept.name },
-        { $set: { detail: dept.detail, group: 'academic' }, $setOnInsert: { name: dept.name, count: 0, status: dept.status, head: dept.head } },
-        { upsert: true }
-      );
+            // Only create the default departments on a brand-new database
+    if ((await Department.countDocuments()) === 0) {
+      for (const dept of desiredDepartments) {
+        await Department.updateOne(
+          { name: dept.name },
+          { $set: { detail: dept.detail, group: 'academic' }, $setOnInsert: { name: dept.name, count: 0, status: dept.status, head: dept.head } },
+          { upsert: true }
+        );
+      }
     }
+    
 
     // Auto-register any employee department not already tracked, as an
     // administrative/support unit.
@@ -940,20 +944,57 @@ app.post('/api/departments', async (req, res) => {
   }
 });
 
-// Edit an existing department's detail / status / head
+// Edit a department: rename, description, status, head
 app.put('/api/departments/:name', async (req, res) => {
   try {
-    const { detail, status, head, group } = req.body;
-    const update = {};
-    if (detail !== undefined) update.detail = detail;
-    if (status !== undefined) update.status = status;
-    if (head !== undefined) update.head = head;
-    if (group !== undefined) update.group = group;
-    const updated = await Department.findOneAndUpdate({ name: req.params.name }, update, { new: true });
-    if (!updated) return res.status(404).json({ error: 'Department not found' });
-    res.json(updated);
+    const { detail, status, head, group, newName } = req.body;
+    const oldName = req.params.name;
+    const dept = await Department.findOne({ name: oldName });
+    if (!dept) return res.status(404).json({ error: 'Department not found' });
+
+    if (detail !== undefined) dept.detail = detail;
+    if (status !== undefined) dept.status = status;
+    if (head !== undefined) dept.head = head;
+    if (group !== undefined) dept.group = group;
+
+    const cleanNew = (newName || '').trim();
+    if (cleanNew && cleanNew !== oldName) {
+      const escaped = cleanNew.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const dup = await Department.findOne({ name: new RegExp('^' + escaped + '$', 'i'), _id: { $ne: dept._id } });
+      if (dup) return res.status(400).json({ error: 'A department with that name already exists' });
+
+      dept.name = cleanNew;
+      // Keep everything that points to the old name in sync
+      await Employee.updateMany({ department: oldName }, { department: cleanNew });
+      await Separated.updateMany({ department: oldName }, { department: cleanNew });
+      await AttendanceLog.updateMany({ department: oldName }, { department: cleanNew });
+      await Report.updateMany({ department: oldName }, { department: cleanNew });
+      await LeaveRequest.updateMany({ dept: oldName }, { dept: cleanNew });
+      await Activity.create({ icon: 'fa-building', text: `Department "${oldName}" was renamed to "${cleanNew}"`, when: 'just now' });
+    } else if (status !== undefined) {
+      await Activity.create({ icon: 'fa-building', text: `Department "${oldName}" was set to ${status}`, when: 'just now' });
+    }
+
+    await dept.save();
+    res.json(dept);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update department' });
+  }
+});
+
+// Remove a department (its employees become Unassigned, records are kept)
+app.delete('/api/departments/:name', async (req, res) => {
+  try {
+    const name = req.params.name;
+    const dept = await Department.findOne({ name });
+    if (!dept) return res.status(404).json({ error: 'Department not found' });
+
+    const moved = await Employee.updateMany({ department: name }, { department: 'Unassigned' });
+    await Department.deleteOne({ _id: dept._id });
+    await Activity.create({ icon: 'fa-building', text: `Department "${name}" was removed`, when: 'just now' });
+    res.json({ success: true, unassigned: moved.modifiedCount || 0 });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove department' });
   }
 });
 
