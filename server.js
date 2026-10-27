@@ -563,6 +563,249 @@ app.put('/api/employees/:id/password', async (req, res) => {
   }
 });
 
+// HR attaches a biometric device log entry directly — sets the EXACT
+// time in / time out so both HR and the employee see the same real value.
+app.post('/api/attendance/biometric-log', async (req, res) => {
+  try {
+    const { employeeId, date, timeIn, timeOut } = req.body;
+    if (!employeeId || !date) return res.status(400).json({ error: 'employeeId and date are required' });
+    const emp = await Employee.findOne({ id: employeeId });
+    if (!emp) return res.status(404).json({ error: 'Employee not found' });
+
+    let log = await AttendanceLog.findOne({ employeeId, date });
+    if (!log) {
+      log = new AttendanceLog({ employeeId, name: `${emp.first} ${emp.last}`, department: emp.department, date, timeIn: null, timeOut: null, status: 'Present' });
+    }
+    if (timeIn) log.timeIn = timeIn;
+    if (timeOut) log.timeOut = timeOut;
+
+    if (log.timeIn) {
+      const inHour = parseTimeToHourFloat(log.timeIn);
+      log.status = inHour > 8 ? 'Late' : 'Present';
+    }
+    if (log.timeOut) {
+      const outHour = parseTimeToHourFloat(log.timeOut);
+      if (outHour < 18) log.status = 'Undertime';
+    }
+    log.source = 'Biometric';
+    await log.save();
+
+    await Activity.create({ icon: 'fa-fingerprint', text: `Biometric log attached for ${log.name} (${date})`, when: 'just now' });
+    res.json({ success: true, log });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to attach biometric log' });
+  }
+});
+
+// HR attaches a photo (and optionally time in/out rows read from it)
+app.post('/api/attendance/biometric-import', async (req, res) => {
+  try {
+    const { fileName, image, rawText, importedBy, rows = [], assignedTo = [] } = req.body;
+    if (!image) return res.status(400).json({ error: 'Please attach a photo' });
+
+    let saved = 0;
+    const storedRows = [];
+
+    for (const r of rows) {
+      const row = {
+        employeeId: r.employeeId || '', name: r.name || '', department: r.department || '',
+        position: r.position || '', date: r.date || '', timeIn: r.timeIn || '', timeOut: r.timeOut || '',
+        status: '', matched: false
+      };
+      try {
+        const emp = r.include && r.employeeId ? await Employee.findOne({ id: r.employeeId }) : null;
+        if (emp && r.date && (r.timeIn || r.timeOut)) {
+          let log = await AttendanceLog.findOne({ employeeId: emp.id, date: r.date });
+          if (!log) {
+            log = new AttendanceLog({ employeeId: emp.id, name: `${emp.first} ${emp.last}`, department: emp.department, date: r.date, timeIn: null, timeOut: null, status: 'Present' });
+          }
+          if (r.timeIn) log.timeIn = r.timeIn;
+          if (r.timeOut) log.timeOut = r.timeOut;
+          if (log.timeIn) log.status = parseTimeToHourFloat(log.timeIn) > 8 ? 'Late' : 'Present';
+          if (log.timeOut && parseTimeToHourFloat(log.timeOut) < 18) log.status = 'Undertime';
+          log.source = 'Biometric Photo';
+          await log.save();
+          row.status = log.status;
+          row.matched = true;
+          row.name = `${emp.first} ${emp.last}`;
+          row.department = emp.department;
+          row.position = emp.position;
+          saved++;
+        }
+      } catch (rowErr) {
+        console.error('Biometric row skipped:', rowErr.message);
+      }
+      storedRows.push(row);
+    }
+
+    await BiometricImport.create({
+      fileName: fileName || 'biometric-photo',
+      image, rawText: rawText || '', importedBy: importedBy || 'HR Admin',
+      savedCount: saved, assignedTo, rows: storedRows
+    });
+
+    try {
+      await Activity.create({
+        icon: 'fa-fingerprint',
+        text: `Biometric photo attached` + (saved ? ` — ${saved} attendance record(s) updated` : '') + (assignedTo.length ? `, shown to ${assignedTo.length} employee(s)` : ''),
+        when: 'just now'
+      });
+    } catch (e) {}
+
+    res.json({ success: true, saved });
+  } catch (error) {
+    console.error('Biometric import error:', error);
+    res.status(500).json({ error: 'Failed to import biometric photo: ' + error.message });
+  }
+});
+
+// HR attaches a photo (optionally with attendance rows read from it)
+app.post('/api/attendance/biometric-import', async (req, res) => {
+  try {
+    const { fileName, image, rawText, importedBy, rows = [], assignedTo = [] } = req.body;
+    if (!image) return res.status(400).json({ error: 'Please attach a photo' });
+
+    let saved = 0;
+    const storedRows = [];
+
+    for (const r of rows) {
+      const row = {
+        employeeId: r.employeeId || '', name: r.name || '', department: r.department || '',
+        position: r.position || '', date: r.date || '', timeIn: r.timeIn || '', timeOut: r.timeOut || '',
+        status: '', matched: false
+      };
+      try {
+        const emp = r.include && r.employeeId ? await Employee.findOne({ id: r.employeeId }) : null;
+        if (emp && r.date && (r.timeIn || r.timeOut)) {
+          let log = await AttendanceLog.findOne({ employeeId: emp.id, date: r.date });
+          if (!log) {
+            log = new AttendanceLog({ employeeId: emp.id, name: `${emp.first} ${emp.last}`, department: emp.department, date: r.date, timeIn: null, timeOut: null, status: 'Present' });
+          }
+          if (r.timeIn) log.timeIn = r.timeIn;
+          if (r.timeOut) log.timeOut = r.timeOut;
+          if (log.timeIn) log.status = parseTimeToHourFloat(log.timeIn) > 8 ? 'Late' : 'Present';
+          if (log.timeOut && parseTimeToHourFloat(log.timeOut) < 18) log.status = 'Undertime';
+          log.source = 'Biometric Photo';
+          await log.save();
+          row.status = log.status;
+          row.matched = true;
+          row.name = `${emp.first} ${emp.last}`;
+          row.department = emp.department;
+          row.position = emp.position;
+          saved++;
+        }
+      } catch (rowErr) {
+        console.error('Biometric row skipped:', rowErr.message);
+      }
+      storedRows.push(row);
+    }
+
+    await BiometricImport.create({
+      fileName: fileName || 'biometric-photo',
+      image, rawText: rawText || '', importedBy: importedBy || 'HR Admin',
+      savedCount: saved, assignedTo, rows: storedRows
+    });
+
+    try {
+      await Activity.create({
+        icon: 'fa-fingerprint',
+        text: 'Biometric photo attached' + (saved ? ` — ${saved} attendance record(s) updated` : '') + (assignedTo.length ? `, shown to ${assignedTo.length} employee(s)` : ''),
+        when: 'just now'
+      });
+    } catch (e) {}
+
+    res.json({ success: true, saved });
+  } catch (error) {
+    console.error('Biometric import error:', error);
+    res.status(500).json({ error: 'Failed to import biometric photo: ' + error.message });
+  }
+});
+
+// List of attached photos (without the heavy image data)
+app.get('/api/attendance/biometric-imports', async (req, res) => {
+  try {
+    res.json(await BiometricImport.find({}, { image: 0, rawText: 0 }).sort({ createdAt: -1 }).limit(100));
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch biometric imports' });
+  }
+});
+
+// Serves just the photo itself (used for the thumbnail in the HR list)
+
+app.get('/api/attendance/biometric-imports/:id/image', async (req, res) => {
+  try {
+    const doc = await BiometricImport.findById(req.params.id, { image: 1 });
+    if (!doc || !doc.image) return res.status(404).end();
+    const m = doc.image.match(/^data:(.+?);base64,(.+)$/);
+    if (!m) return res.status(404).end();
+    res.set('Content-Type', m[1]);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(Buffer.from(m[2], 'base64'));
+  } catch (error) {
+    res.status(500).end();
+  }
+});
+
+// One attached photo with its image and all rows
+app.get('/api/attendance/biometric-imports/:id', async (req, res) => {
+  try {
+    const doc = await BiometricImport.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    res.json(doc);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch biometric import' });
+  }
+});
+
+// Removes only the saved photo record (attendance logs stay)
+app.delete('/api/attendance/biometric-imports/:id', async (req, res) => {
+  try {
+    await BiometricImport.findByIdAndDelete(req.params.id);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete biometric import' });
+  }
+});
+
+// Bulk save: many employees' time in / out read from a biometric photo.
+// Same rules as the single biometric log (after 8:00 = Late, out before 6:00 PM = Undertime).
+app.post('/api/attendance/biometric-bulk', async (req, res) => {
+  try {
+    const { entries } = req.body;
+    if (!Array.isArray(entries) || !entries.length) {
+      return res.status(400).json({ error: 'No entries provided' });
+    }
+    let saved = 0;
+    const skipped = [];
+    for (const { employeeId, date, timeIn, timeOut } of entries) {
+      const emp = await Employee.findOne({ id: employeeId });
+      if (!emp || !date || (!timeIn && !timeOut)) { skipped.push(employeeId); continue; }
+
+      let log = await AttendanceLog.findOne({ employeeId, date });
+      if (!log) {
+        log = new AttendanceLog({ employeeId, name: `${emp.first} ${emp.last}`, department: emp.department, date, timeIn: null, timeOut: null, status: 'Present' });
+      }
+      if (timeIn) log.timeIn = timeIn;
+      if (timeOut) log.timeOut = timeOut;
+
+      if (log.timeIn) {
+        log.status = parseTimeToHourFloat(log.timeIn) > 8 ? 'Late' : 'Present';
+      }
+      if (log.timeOut && parseTimeToHourFloat(log.timeOut) < 18) {
+        log.status = 'Undertime';
+      }
+      log.source = 'Biometric Photo';
+      await log.save();
+      saved++;
+    }
+    await Activity.create({ icon: 'fa-fingerprint', text: `Biometric photo attached — ${saved} attendance record(s) updated`, when: 'just now' });
+    res.json({ success: true, saved, skipped });
+  } catch (error) {
+    console.error('Biometric bulk error:', error);
+    res.status(500).json({ error: 'Failed to save biometric data' });
+  }
+});
+
 app.put('/api/employees/:id', async (req, res) => {
   try {
     const old = await Employee.findOne({ id: req.params.id });
