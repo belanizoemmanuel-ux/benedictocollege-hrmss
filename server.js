@@ -194,20 +194,6 @@ const Report = mongoose.model('Report', new mongoose.Schema({
   }
 }));
 
-const BiometricImport = mongoose.models.BiometricImport || mongoose.model('BiometricImport', new mongoose.Schema({
-  fileName: String,
-  image: String,
-  rawText: String,
-  importedBy: String,
-  savedCount: Number,
-  assignedTo: [String],
-  createdAt: { type: Date, default: Date.now },
-  rows: [{
-    employeeId: String, name: String, department: String, position: String,
-    date: String, timeIn: String, timeOut: String, status: String, matched: Boolean
-  }]
-}));
-
 // ─── Seed Data ───
 async function seed() {
   try {
@@ -396,23 +382,6 @@ function emailMatch(email) {
   return { $regex: new RegExp('^' + clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
 }
 
-app.get('/api/attendance/biometric-imports/employee/:employeeId', async (req, res) => {
-  try {
-    const { employeeId } = req.params;
-    const docs = await BiometricImport.find({
-      $or: [{ 'rows.employeeId': employeeId }, { assignedTo: employeeId }]
-    }).sort({ createdAt: -1 }).limit(30);
-    res.json(docs.map(d => ({
-      _id: d._id,
-      fileName: d.fileName,
-      image: d.image,
-      createdAt: d.createdAt,
-      rows: (d.rows || []).filter(r => r.employeeId === employeeId && r.matched)
-    })));
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch your biometric photos' });
-  }
-});
 
 // ─── Auth Routes ───
 app.post('/api/auth/login', async (req, res) => {
@@ -563,39 +532,6 @@ app.put('/api/employees/:id/password', async (req, res) => {
   }
 });
 
-// HR attaches a biometric device log entry directly — sets the EXACT
-// time in / time out so both HR and the employee see the same real value.
-app.post('/api/attendance/biometric-log', async (req, res) => {
-  try {
-    const { employeeId, date, timeIn, timeOut } = req.body;
-    if (!employeeId || !date) return res.status(400).json({ error: 'employeeId and date are required' });
-    const emp = await Employee.findOne({ id: employeeId });
-    if (!emp) return res.status(404).json({ error: 'Employee not found' });
-
-    let log = await AttendanceLog.findOne({ employeeId, date });
-    if (!log) {
-      log = new AttendanceLog({ employeeId, name: `${emp.first} ${emp.last}`, department: emp.department, date, timeIn: null, timeOut: null, status: 'Present' });
-    }
-    if (timeIn) log.timeIn = timeIn;
-    if (timeOut) log.timeOut = timeOut;
-
-    if (log.timeIn) {
-      const inHour = parseTimeToHourFloat(log.timeIn);
-      log.status = inHour > 8 ? 'Late' : 'Present';
-    }
-    if (log.timeOut) {
-      const outHour = parseTimeToHourFloat(log.timeOut);
-      if (outHour < 18) log.status = 'Undertime';
-    }
-    log.source = 'Biometric';
-    await log.save();
-
-    await Activity.create({ icon: 'fa-fingerprint', text: `Biometric log attached for ${log.name} (${date})`, when: 'just now' });
-    res.json({ success: true, log });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to attach biometric log' });
-  }
-});
 
 // HR attaches a photo (and optionally time in/out rows read from it)
 app.post('/api/attendance/biometric-import', async (req, res) => {

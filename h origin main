@@ -1,0 +1,15 @@
+[33ma9facc3[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Remove biometric photo feature
+[33md073534[m Remove biometric photo feature
+[33mb30d3f7[m fix logo path
+[33mf52e4ce[m Fix logo paths
+[33m2ad6ee0[m fix logo path
+[33m796461c[m add logo and images
+[33madbc3d0[m Fix backend URL
+[33m00e0962[m Fix Cloudflare assets directory
+[33m859818f[m Upload Benedicto College HRMS
+[33mf48abca[m First upload
+[33m12d648d[m Upload HRMS system
+[33mc437736[m first commit
+[33mf7782bb[m first commit
+[33m772f0fe[m Remove fake attendance seed, add cleanup route
+[33m9ba56b5[m Initial HRMS project
