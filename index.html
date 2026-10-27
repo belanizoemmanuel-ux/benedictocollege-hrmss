@@ -2769,7 +2769,6 @@ window.sidebarQuickAttendance = async function(kind) {
           : `Daily attendance log for ${new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}. Click a card below to filter the log.`}</p>
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <button class="btn btn-navy" onclick="showBiometricPhotoModal()"><i class="fas fa-camera"></i> Attach Biometric Photo</button>
         <div id="attendanceArchiveWrap" style="position:relative;">
           <button class="btn btn-outline" title="Browse past attendance by month" onclick="toggleAttendanceArchive(event)"><i class="fas fa-box-archive"></i> ${viewingArchive ? getMonthLabel(attendanceArchiveMonth) : 'Archive'}</button>
           <div class="month-archive-panel" id="attendanceArchivePanel">
