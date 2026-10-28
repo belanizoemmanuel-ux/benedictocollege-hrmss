@@ -14,17 +14,70 @@ function isHashed(str) {
   return /^\$2[aby]\$\d{2}\$/.test(String(str || ''));
 }
 
+const ALLOWED_ORIGINS = [
+  'https://hrbenedicto.com',
+  'https://www.hrbenedicto.com',
+  'https://benedictocollege-hrmss-1.onrender.com',
+  'http://localhost:3000'
+];
 app.use(cors({
-  origin: '*',
+  origin: (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin)),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
+// ═════════ SECURITY ═════════
+const jwt = require('jsonwebtoken');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+
+if (!process.env.JWT_SECRET) { console.error('❌ JWT_SECRET is missing'); process.exit(1); }
+
+app.set('trust proxy', 1); // Render sits behind a proxy
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use('/api/auth/login', rateLimit({
+  windowMs: 15 * 60 * 1000, max: 10,
+  message: { error: 'Too many login attempts. Try again in 15 minutes.' }
+}));
+
+const PUBLIC_ROUTES = ['/auth/login', '/time', '/test'];
+const EMPLOYEE_ROUTES = [
+  ['GET', '/employees'], ['PUT', /^\/employees\/[^/]+$/],
+  ['GET', '/leave-requests'], ['POST', '/leave-requests/submit'],
+  ['GET', '/complaints'], ['POST', '/complaints'],
+  ['GET', '/announcements'], ['GET', '/reports'],
+  ['GET', '/attendance'], ['GET', '/attendance/status-today'],
+  ['POST', '/attendance/time-in'], ['POST', '/attendance/time-out'],
+  ['GET', /^\/attendance\/employee\//]
+];
+
+app.use('/api', (req, res, next) => {
+  if (PUBLIC_ROUTES.includes(req.path)) return next();
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  try { req.user = jwt.verify(token, process.env.JWT_SECRET); }
+  catch (e) { return res.status(401).json({ error: 'Invalid or expired token' }); }
+
+  if (req.user.role === 'admin') return next();
+  const allowed = EMPLOYEE_ROUTES.some(([m, p]) =>
+    m === req.method && (p instanceof RegExp ? p.test(req.path) : p === req.path));
+  if (!allowed) return res.status(403).json({ error: 'Not allowed' });
+  next();
+});
+
+// An employee may only touch their own :employeeId
+app.param('employeeId', (req, res, next, id) => {
+  if (req.user && (req.user.role === 'admin' || req.user.empId === id)) return next();
+  res.status(403).json({ error: 'Not allowed' });
+});
+
 app.use(express.json({ limit: '15mb' }));
 
-// Serve your HTML, CSS, JS, images, etc.
-app.use(express.static(path.join(__dirname)));
-
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/public', express.static(path.join(__dirname, 'public')));
+// ...at the bottom:
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 // ─────────────────────────────────────
 // MONGODB
 // ─────────────────────────────────────
@@ -200,8 +253,8 @@ async function seed() {
     const userCount = await User.countDocuments();
     if (userCount === 0) {
       await User.insertMany([
-      { name: 'HR Admin', email: 'admin@benedicto.edu', password: bcrypt.hashSync('ChangeThisNow#2026', 12), role: 'admin', phone: '0917-555-0000', position: 'HR Manager' },
-      { name: 'Emma Santos', email: 'emma.santos@benedicto.edu', password: bcrypt.hashSync('ChangeThisToo#2026', 12), role: 'employee' }
+      { name: 'HR Admin', email: 'admin@benedicto.edu', password: bcrypt.hashSync(process.env.ADMIN_INITIAL_PASSWORD || require('crypto').randomBytes(12).toString('hex'), 12), role: 'admin', phone: '0917-555-0000', position: 'HR Manager' },
+      { name: 'Emma Santos', email: 'emma.santos@benedicto.edu', password: bcrypt.hashSync(process.env.EMPLOYEE_INITIAL_PASSWORD || require('crypto').randomBytes(12).toString('hex'), 12), role: 'employee' }
       ]);
       console.log('✅ Default users created');
     }
@@ -406,9 +459,15 @@ app.post('/api/auth/login', async (req, res) => {
     const isSeparated = await Separated.findOne({ email: emailMatch(user.email) });
     if (isSeparated) return res.status(403).json({ error: 'This account is deactivated. Please contact HR.' });
 
+    const emp = user.role === 'employee' ? await Employee.findOne({ email: emailMatch(user.email) }) : null;
+    const token = jwt.sign(
+      { uid: String(user._id), email: user.email, name: user.name, role: user.role, empId: emp ? emp.id : null },
+      process.env.JWT_SECRET,
+      { expiresIn: '8h' }
+    );
     res.json({
       user: { name: user.name, email: user.email, role: user.role, phone: user.phone, position: user.position, photo: user.photo },
-      token: 'demo-token-' + user._id
+      token
     });
     } catch (error) {
     console.error('Login error:', error.message);
@@ -420,6 +479,7 @@ app.post('/api/auth/login', async (req, res) => {
 // screen, which has no matching Employee record to update instead).
 app.put('/api/users/:email', async (req, res) => {
   try {
+    if ((req.user.email || '').toLowerCase() !== req.params.email.toLowerCase()) return res.status(403).json({ error: 'Not allowed' });
     const { name, email, phone, position, photo } = req.body;
     const update = {};
     if (name) update.name = name;
@@ -435,18 +495,12 @@ app.put('/api/users/:email', async (req, res) => {
   }
 });
 
-// ─── Employee Routes ───
+// employees
 app.get('/api/employees', async (req, res) => {
   try {
-    res.json(await Employee.find());
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch employees' });
-  }
-});
-
-app.get('/api/dev/clear-today-attendance', async (req, res) => {
-  const result = await AttendanceLog.deleteMany({ date: manilaNow().date });
-  res.json({ deleted: result.deletedCount });
+    const filter = req.user.role === 'admin' ? {} : { id: req.user.empId };
+    res.json(await Employee.find(filter));
+  } catch (e) { res.status(500).json({ error: 'Failed to fetch employees' }); }
 });
 
 app.get('/api/employees/by-email/:email', async (req, res) => {
@@ -489,6 +543,12 @@ app.post('/api/employees', async (req, res) => {
 });
 
 app.put('/api/employees/:id/password', async (req, res) => {
+      let body = req.body;
+    if (req.user.role !== 'admin') {
+      if (req.user.empId !== req.params.id) return res.status(403).json({ error: 'Not allowed' });
+      const allowed = ['first', 'last', 'middle', 'dob', 'gender', 'phone', 'photo'];
+      body = Object.fromEntries(Object.entries(req.body).filter(([k]) => allowed.includes(k)));
+    }
   try {
     const password = String((req.body && req.body.password) || '').trim();
     if (password.length < 6) {
@@ -532,220 +592,10 @@ app.put('/api/employees/:id/password', async (req, res) => {
   }
 });
 
-
-// HR attaches a photo (and optionally time in/out rows read from it)
-app.post('/api/attendance/biometric-import', async (req, res) => {
-  try {
-    const { fileName, image, rawText, importedBy, rows = [], assignedTo = [] } = req.body;
-    if (!image) return res.status(400).json({ error: 'Please attach a photo' });
-
-    let saved = 0;
-    const storedRows = [];
-
-    for (const r of rows) {
-      const row = {
-        employeeId: r.employeeId || '', name: r.name || '', department: r.department || '',
-        position: r.position || '', date: r.date || '', timeIn: r.timeIn || '', timeOut: r.timeOut || '',
-        status: '', matched: false
-      };
-      try {
-        const emp = r.include && r.employeeId ? await Employee.findOne({ id: r.employeeId }) : null;
-        if (emp && r.date && (r.timeIn || r.timeOut)) {
-          let log = await AttendanceLog.findOne({ employeeId: emp.id, date: r.date });
-          if (!log) {
-            log = new AttendanceLog({ employeeId: emp.id, name: `${emp.first} ${emp.last}`, department: emp.department, date: r.date, timeIn: null, timeOut: null, status: 'Present' });
-          }
-          if (r.timeIn) log.timeIn = r.timeIn;
-          if (r.timeOut) log.timeOut = r.timeOut;
-          if (log.timeIn) log.status = parseTimeToHourFloat(log.timeIn) > 8 ? 'Late' : 'Present';
-          if (log.timeOut && parseTimeToHourFloat(log.timeOut) < 18) log.status = 'Undertime';
-          log.source = 'Biometric Photo';
-          await log.save();
-          row.status = log.status;
-          row.matched = true;
-          row.name = `${emp.first} ${emp.last}`;
-          row.department = emp.department;
-          row.position = emp.position;
-          saved++;
-        }
-      } catch (rowErr) {
-        console.error('Biometric row skipped:', rowErr.message);
-      }
-      storedRows.push(row);
-    }
-
-    await BiometricImport.create({
-      fileName: fileName || 'biometric-photo',
-      image, rawText: rawText || '', importedBy: importedBy || 'HR Admin',
-      savedCount: saved, assignedTo, rows: storedRows
-    });
-
-    try {
-      await Activity.create({
-        icon: 'fa-fingerprint',
-        text: `Biometric photo attached` + (saved ? ` — ${saved} attendance record(s) updated` : '') + (assignedTo.length ? `, shown to ${assignedTo.length} employee(s)` : ''),
-        when: 'just now'
-      });
-    } catch (e) {}
-
-    res.json({ success: true, saved });
-  } catch (error) {
-    console.error('Biometric import error:', error);
-    res.status(500).json({ error: 'Failed to import biometric photo: ' + error.message });
-  }
-});
-
-// HR attaches a photo (optionally with attendance rows read from it)
-app.post('/api/attendance/biometric-import', async (req, res) => {
-  try {
-    const { fileName, image, rawText, importedBy, rows = [], assignedTo = [] } = req.body;
-    if (!image) return res.status(400).json({ error: 'Please attach a photo' });
-
-    let saved = 0;
-    const storedRows = [];
-
-    for (const r of rows) {
-      const row = {
-        employeeId: r.employeeId || '', name: r.name || '', department: r.department || '',
-        position: r.position || '', date: r.date || '', timeIn: r.timeIn || '', timeOut: r.timeOut || '',
-        status: '', matched: false
-      };
-      try {
-        const emp = r.include && r.employeeId ? await Employee.findOne({ id: r.employeeId }) : null;
-        if (emp && r.date && (r.timeIn || r.timeOut)) {
-          let log = await AttendanceLog.findOne({ employeeId: emp.id, date: r.date });
-          if (!log) {
-            log = new AttendanceLog({ employeeId: emp.id, name: `${emp.first} ${emp.last}`, department: emp.department, date: r.date, timeIn: null, timeOut: null, status: 'Present' });
-          }
-          if (r.timeIn) log.timeIn = r.timeIn;
-          if (r.timeOut) log.timeOut = r.timeOut;
-          if (log.timeIn) log.status = parseTimeToHourFloat(log.timeIn) > 8 ? 'Late' : 'Present';
-          if (log.timeOut && parseTimeToHourFloat(log.timeOut) < 18) log.status = 'Undertime';
-          log.source = 'Biometric Photo';
-          await log.save();
-          row.status = log.status;
-          row.matched = true;
-          row.name = `${emp.first} ${emp.last}`;
-          row.department = emp.department;
-          row.position = emp.position;
-          saved++;
-        }
-      } catch (rowErr) {
-        console.error('Biometric row skipped:', rowErr.message);
-      }
-      storedRows.push(row);
-    }
-
-    await BiometricImport.create({
-      fileName: fileName || 'biometric-photo',
-      image, rawText: rawText || '', importedBy: importedBy || 'HR Admin',
-      savedCount: saved, assignedTo, rows: storedRows
-    });
-
-    try {
-      await Activity.create({
-        icon: 'fa-fingerprint',
-        text: 'Biometric photo attached' + (saved ? ` — ${saved} attendance record(s) updated` : '') + (assignedTo.length ? `, shown to ${assignedTo.length} employee(s)` : ''),
-        when: 'just now'
-      });
-    } catch (e) {}
-
-    res.json({ success: true, saved });
-  } catch (error) {
-    console.error('Biometric import error:', error);
-    res.status(500).json({ error: 'Failed to import biometric photo: ' + error.message });
-  }
-});
-
-// List of attached photos (without the heavy image data)
-app.get('/api/attendance/biometric-imports', async (req, res) => {
-  try {
-    res.json(await BiometricImport.find({}, { image: 0, rawText: 0 }).sort({ createdAt: -1 }).limit(100));
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch biometric imports' });
-  }
-});
-
-// Serves just the photo itself (used for the thumbnail in the HR list)
-
-app.get('/api/attendance/biometric-imports/:id/image', async (req, res) => {
-  try {
-    const doc = await BiometricImport.findById(req.params.id, { image: 1 });
-    if (!doc || !doc.image) return res.status(404).end();
-    const m = doc.image.match(/^data:(.+?);base64,(.+)$/);
-    if (!m) return res.status(404).end();
-    res.set('Content-Type', m[1]);
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.send(Buffer.from(m[2], 'base64'));
-  } catch (error) {
-    res.status(500).end();
-  }
-});
-
-// One attached photo with its image and all rows
-app.get('/api/attendance/biometric-imports/:id', async (req, res) => {
-  try {
-    const doc = await BiometricImport.findById(req.params.id);
-    if (!doc) return res.status(404).json({ error: 'Not found' });
-    res.json(doc);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch biometric import' });
-  }
-});
-
-// Removes only the saved photo record (attendance logs stay)
-app.delete('/api/attendance/biometric-imports/:id', async (req, res) => {
-  try {
-    await BiometricImport.findByIdAndDelete(req.params.id);
-    res.json({ ok: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to delete biometric import' });
-  }
-});
-
-// Bulk save: many employees' time in / out read from a biometric photo.
-// Same rules as the single biometric log (after 8:00 = Late, out before 6:00 PM = Undertime).
-app.post('/api/attendance/biometric-bulk', async (req, res) => {
-  try {
-    const { entries } = req.body;
-    if (!Array.isArray(entries) || !entries.length) {
-      return res.status(400).json({ error: 'No entries provided' });
-    }
-    let saved = 0;
-    const skipped = [];
-    for (const { employeeId, date, timeIn, timeOut } of entries) {
-      const emp = await Employee.findOne({ id: employeeId });
-      if (!emp || !date || (!timeIn && !timeOut)) { skipped.push(employeeId); continue; }
-
-      let log = await AttendanceLog.findOne({ employeeId, date });
-      if (!log) {
-        log = new AttendanceLog({ employeeId, name: `${emp.first} ${emp.last}`, department: emp.department, date, timeIn: null, timeOut: null, status: 'Present' });
-      }
-      if (timeIn) log.timeIn = timeIn;
-      if (timeOut) log.timeOut = timeOut;
-
-      if (log.timeIn) {
-        log.status = parseTimeToHourFloat(log.timeIn) > 8 ? 'Late' : 'Present';
-      }
-      if (log.timeOut && parseTimeToHourFloat(log.timeOut) < 18) {
-        log.status = 'Undertime';
-      }
-      log.source = 'Biometric Photo';
-      await log.save();
-      saved++;
-    }
-    await Activity.create({ icon: 'fa-fingerprint', text: `Biometric photo attached — ${saved} attendance record(s) updated`, when: 'just now' });
-    res.json({ success: true, saved, skipped });
-  } catch (error) {
-    console.error('Biometric bulk error:', error);
-    res.status(500).json({ error: 'Failed to save biometric data' });
-  }
-});
-
 app.put('/api/employees/:id', async (req, res) => {
   try {
     const old = await Employee.findOne({ id: req.params.id });
-    const updated = await Employee.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+    const updated = await Employee.findOneAndUpdate({ id: req.params.id }, body, { new: true });
     if (!updated) return res.status(404).json({ error: 'Employee not found' });
 
     if (old && old.department !== updated.department) {
@@ -935,14 +785,12 @@ app.delete('/api/departments/:name', async (req, res) => {
   }
 });
 
-// ─── Leave Routes ───
+// leave requests
 app.get('/api/leave-requests', async (req, res) => {
   try {
-    const requests = await LeaveRequest.find().sort({ id: -1 });
-    res.json(requests);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch leave requests' });
-  }
+    const filter = req.user.role === 'admin' ? {} : { email: emailMatch(req.user.email) };
+    res.json(await LeaveRequest.find(filter).sort({ id: -1 }));
+  } catch (e) { res.status(500).json({ error: 'Failed to fetch leave requests' }); }
 });
 
 app.get('/api/leave-requests/employee/:email', async (req, res) => {
@@ -966,16 +814,14 @@ app.get('/api/leave-requests/:id', async (req, res) => {
 });
 
 app.post('/api/leave-requests/submit', async (req, res) => {
-  console.log('📝 Received leave request:', req.body);
   try {
-    const { name, email, dept, type, dates, reason, startDate, endDate } = req.body;
+    const { type, dates, reason, startDate, endDate } = req.body;
+    if (!type || !dates) return res.status(400).json({ error: 'Missing required fields' });
 
-    if (!name || !email || !dept || !type || !dates) {
-      return res.status(400).json({ 
-        error: 'Missing required fields',
-        details: { name, email, dept, type, dates }
-      });
-    }
+    // Identity comes from the login token, not from the request body
+    const emp = await Employee.findOne({ id: req.user.empId });
+    if (!emp) return res.status(404).json({ error: 'Employee record not found' });
+    const name = `${emp.first} ${emp.last}`, email = emp.email, dept = emp.department;
 
     let daysRequested = 1;
     if (startDate && endDate) {
@@ -985,14 +831,9 @@ app.post('/api/leave-requests/submit', async (req, res) => {
       daysRequested = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     }
 
-    // Case/whitespace-insensitive lookup — this is what was causing
-    // "Employee not found" and silently blocking the submission before.
-    const emp = await Employee.findOne({ email: emailMatch(email) });
-    if (!emp) return res.status(404).json({ error: 'Employee not found for email: ' + email });
-
     if (emp.leaveBalance < daysRequested) {
-      return res.status(400).json({ 
-        error: `Insufficient leave balance. You have ${emp.leaveBalance} day(s) left, but requested ${daysRequested} day(s).` 
+      return res.status(400).json({
+        error: `Insufficient leave balance. You have ${emp.leaveBalance} day(s) left, but requested ${daysRequested} day(s).`
       });
     }
 
@@ -1013,27 +854,23 @@ app.post('/api/leave-requests/submit', async (req, res) => {
       status: 'Pending',
       daysRequested
     });
-
     await leaveRequest.save();
 
-    await Activity.create({ 
-      icon: 'fa-file-lines', 
-      text: `${name} submitted a ${type} leave request (${daysRequested} day(s))`, 
-      when: 'just now' 
+    await Activity.create({
+      icon: 'fa-file-lines',
+      text: `${name} submitted a ${type} leave request (${daysRequested} day(s))`,
+      when: 'just now'
     });
 
-    res.status(201).json({ 
-      success: true, 
+    res.status(201).json({
+      success: true,
       message: 'Leave request submitted successfully',
       remainingBalance: emp.leaveBalance,
-      data: leaveRequest 
+      data: leaveRequest
     });
   } catch (error) {
     console.error('❌ Submit leave error:', error);
-    res.status(500).json({ 
-      error: 'Failed to submit leave request: ' + error.message,
-      stack: error.stack 
-    });
+    res.status(500).json({ error: 'Failed to submit leave request: ' + error.message });
   }
 });
 
@@ -1078,13 +915,23 @@ app.delete('/api/leave-requests/:id', async (req, res) => {
   }
 });
 
-// ─── Complaint Routes ───
+// complaints
 app.get('/api/complaints', async (req, res) => {
   try {
-    res.json(await Complaint.find());
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch complaints' });
-  }
+    const filter = req.user.role === 'admin' ? {} : { employee: emailMatch(req.user.email) };
+    res.json(await Complaint.find(filter));
+  } catch (e) { res.status(500).json({ error: 'Failed to fetch complaints' }); }
+});
+app.post('/api/complaints', async (req, res) => {
+  try {
+    const data = req.user.role === 'admin'
+      ? req.body
+      : { subject: req.body.subject, priority: req.body.priority, date: req.body.date,
+          employee: req.user.email, status: 'Pending' };
+    const comp = new Complaint(data);
+    await comp.save();
+    res.status(201).json(comp);
+  } catch (e) { res.status(500).json({ error: 'Failed to create complaint' }); }
 });
 
 app.post('/api/complaints', async (req, res) => {
@@ -1106,20 +953,18 @@ app.put('/api/complaints/:id', async (req, res) => {
   }
 });
 
-// ─── Attendance Routes ───
+// attendance (list)
 app.get('/api/attendance', async (req, res) => {
   try {
-    const { date } = req.query;
-    const query = date ? { date } : {};
+    const query = req.query.date ? { date: req.query.date } : {};
+    if (req.user.role !== 'admin') query.employeeId = req.user.empId;
     res.json(await AttendanceLog.find(query));
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch attendance' });
-  }
+  } catch (e) { res.status(500).json({ error: 'Failed to fetch attendance' }); }
 });
 
 app.get('/api/attendance/stats/:employeeId', async (req, res) => {
   try {
-    const { employeeId } = req.params;
+    const employeeId = req.user.role === 'admin' ? req.body.employeeId : req.user.empId;
     const logs = await AttendanceLog.find({ employeeId }).sort({ date: -1 });
 
     const total = logs.length;
@@ -1235,7 +1080,7 @@ app.get('/api/attendance/status-today', async (req, res) => {
     const date = ph.date;
     const pastCutoff = ph.hour >= 17; // 5:00 PM Philippine time
 
-    const emps = await Employee.find({ status: { $ne: 'Inactive' } });
+      const emps = await Employee.find({ status: { $ne: 'Inactive' }, ...(req.user.role === 'admin' ? {} : { id: req.user.empId }) });
     const logs = await AttendanceLog.find({ date });
     const logMap = {};
     logs.forEach(l => { logMap[l.employeeId] = l; });
@@ -1405,15 +1250,12 @@ app.get('/api/activities', async (req, res) => {
   }
 });
 
-// ─── Report Routes ───
+// reports
 app.get('/api/reports', async (req, res) => {
   try {
-    const { employeeId } = req.query;
-    const query = employeeId ? { employeeId } : {};
-    res.json(await Report.find(query).sort({ evaluationDate: -1 }));
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch reports' });
-  }
+    const filter = req.user.role === 'admin' ? {} : { employeeId: req.user.empId };
+    res.json(await Report.find(filter).sort({ evaluationDate: -1 }));
+  } catch (e) { res.status(500).json({ error: 'Failed to fetch reports' }); }
 });
 
 app.post('/api/reports', async (req, res) => {
@@ -1451,7 +1293,7 @@ app.get('/api/test', (req, res) => {
 });
 
 // ─── Start ───
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
 
 const PORT = process.env.PORT || 3000;
 
