@@ -761,7 +761,7 @@
   <div id="app">
     <aside id="sidebar">
       <div class="brand-row">
-        <div class="brand-badge"><img src="/public/logo.png" onerror="if(!this.dataset.t){this.dataset.t=1;this.src='/logo.png'}" alt="Benedicto College Logo" /></div>
+        <div class="brand-badge"><img src="public/logo.png" alt="Benedicto College Logo" /></div>
         <div class="brand">
           <strong>BENEDICTO<br />COLLEGE</strong>
           <small id="portalLabel">EMPLOYEE PORTAL</small>
@@ -842,24 +842,6 @@
 
     const BACKEND_URL = 'https://benedictocollege-hrmss-1.onrender.com';
 const API_BASE_URL = BACKEND_URL + '/api';
-
-const _origFetch = window.fetch.bind(window);
-let _sessionExpiredShown = false;
-window.fetch = async function (url, opts = {}) {
-  if (typeof url === 'string' && url.startsWith(API_BASE_URL)) {
-    const token = localStorage.getItem('bc_token');
-    opts = { ...opts, headers: { ...(opts.headers || {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) } };
-    const res = await _origFetch(url, opts);
-    if (res.status === 401 && !url.includes('/auth/login') && currentUser && !_sessionExpiredShown) {
-      _sessionExpiredShown = true;
-      handleLogout();
-      showToast('Session expired. Please log in again.', 'fa-triangle-exclamation');
-      setTimeout(() => { _sessionExpiredShown = false; }, 2000);
-    }
-    return res;
-  }
-  return _origFetch(url, opts);
-};
     // ═══════════════════════════════════════════════════════════════════
 
     const POSITION_DUTIES = {
@@ -1058,26 +1040,25 @@ setInterval(syncPhTime, 5 * 60 * 1000);
       el.innerHTML = photo ? `<img src="${photo}" alt="${currentUser.name}" />` : '<i class="fas fa-user"></i>';
     }
 
-    async function getJSON(path, fallback) {
-  try { const r = await fetch(`${API_BASE_URL}${path}`); return r.ok ? await r.json() : fallback; }
-  catch (e) { return fallback; }
-}
-async function loadData() {
-  const [emp, dep, lr, comp, ann, act, att, sep, rep] = await Promise.all([
-    getJSON('/employees', []), getJSON('/departments', []), getJSON('/leave-requests', []),
-    getJSON('/complaints', []), getJSON('/announcements', []), getJSON('/activities', []),
-    getJSON(`/attendance?date=${todayStr()}`, []), getJSON('/separated', []), getJSON('/reports', [])
-  ]);
-  if (!currentUser) return;
-  employees = emp; departments = dep; leaveRequests = lr; complaints = comp;
-  announcements = ann; activities = act; attendanceLogs = att; separated = sep; reports = rep;
-}
+    async function loadData() {
+      try {
+        employees = await fetch(`${API_BASE_URL}/employees`).then(r => r.json());
+        departments = await fetch(`${API_BASE_URL}/departments`).then(r => r.json());
+        leaveRequests = await fetch(`${API_BASE_URL}/leave-requests`).then(r => r.json());
+        complaints = await fetch(`${API_BASE_URL}/complaints`).then(r => r.json());
+        announcements = await fetch(`${API_BASE_URL}/announcements`).then(r => r.json());
+        activities = await fetch(`${API_BASE_URL}/activities`).then(r => r.json());
+        attendanceLogs = await fetch(`${API_BASE_URL}/attendance?date=${todayStr()}`).then(r => r.json());
+        separated = await fetch(`${API_BASE_URL}/separated`).then(r => r.json());
+        reports = await fetch(`${API_BASE_URL}/reports`).then(r => r.json());
+      } catch (err) {
+        console.error('Failed to load data:', err);
+        showToast('Failed to load data from server', 'fa-triangle-exclamation');
+      }
+    }
 
     async function reloadAndRender() {
       await loadData();
-      await loadData();
-      if (!currentUser) return;
-      renderSidebar();
       renderPage();
       renderSidebar();
       renderNotifications();
@@ -1227,7 +1208,7 @@ window.sidebarQuickAttendance = async function(kind) {
       <div class="auth-form-panel">
         <div class="auth-card">
           <div class="auth-lock-badge"><i class="fas fa-lock"></i></div>
-          <h2>Login Page</h2>
+          <h2>Welcome Back!</h2>
           <p class="sub">Please login to your account</p>
           <div class="error-msg" id="authError"></div>
           <form id="authForm" onsubmit="handleAuthSubmit(event)">
