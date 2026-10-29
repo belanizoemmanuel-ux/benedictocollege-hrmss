@@ -1147,8 +1147,7 @@ keepPhTimeSynced();
     errEl.textContent = 'Unable to connect to the HR server. Please check your internet connection and try again.';
     errEl.classList.add('show');
   }
-}
-  function showSplash(text) {
+function showSplash(text) {
   const lt = document.getElementById('loginTransition');
   if (!lt) return;
   lt.querySelector('.lt-text').textContent = text || 'Signing you in…';
@@ -1161,6 +1160,10 @@ keepPhTimeSynced();
   });
 
   lt.classList.add('show');
+}
+function hideSplash() {
+  const lt = document.getElementById('loginTransition');
+  if (lt) lt.classList.remove('show');
 }
 
 async function handleLogin(email, password) {
