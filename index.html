@@ -209,7 +209,7 @@
     }
     
     #page.page-anim { animation: pageFadeSlideIn 0.32s cubic-bezier(0.16,1,0.3,1); }
-
+  
     #app { display: flex; min-height: 100vh; display: none; }
     #app.show { display: flex; }
 
@@ -754,6 +754,7 @@
 .college-mini-card.dept-inactive { opacity: 0.6; filter: grayscale(0.4); }
 .cmc-inactive-badge { display: inline-block; background: #fde7e6; color: #b3271f; font-size: 9.5px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; padding: 2px 8px; border-radius: 20px; margin-right: 6px; }
 .btn-amber { background: var(--amber); color: #fff; }
+.day-card .time { white-space: nowrap; font-size: 15px; }
 .box-roster-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
   </style>
@@ -1033,13 +1034,13 @@ function tickSidebarQuickClock() {
 
 function tickClock() {
   const p = phParts();
+  const s = {};
+  _phSecFmt.formatToParts(new Date(phNowMs())).forEach(x => { s[x.type] = x.value; });
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   const dateText = `${p.month} ${p.day}, ${p.year}`;
-  const timeText = `${p.hour}:${p.minute}`;
-  // sidebar (portal)
-  set('curDay', p.weekday); set('curDate', dateText); set('curTime', timeText); set('curAmpm', p.dayPeriod);
-  // login page
-  set('authDay', p.weekday); set('authDate', dateText); set('authTime', timeText); set('authAmpm', p.dayPeriod);
+  const timeText = `${s.hour}:${s.minute}:${s.second}`;
+  set('curDay', p.weekday); set('curDate', dateText); set('curTime', timeText); set('curAmpm', s.dayPeriod);
+  set('authDay', p.weekday); set('authDate', dateText); set('authTime', timeText); set('authAmpm', s.dayPeriod);
 }
 tickClock();
 tickSidebarQuickClock();
@@ -1144,6 +1145,12 @@ setInterval(syncPhTime, 5 * 60 * 1000);
 function hideSplash() {
   const lt = document.getElementById('loginTransition');
   if (lt) lt.classList.remove('show');
+}
+
+async function nextEmployeeId() {
+  const [a, b] = await Promise.all([Employee.find({}, { id: 1 }), Separated.find({}, { id: 1 })]);
+  const nums = [...a, ...b].map(x => String(x.id || '')).filter(s => /^\d+$/.test(s)).map(Number);
+  return String((nums.length ? Math.max(...nums) : 0) + 1);
 }
 
 async function handleLogin(email, password) {
@@ -1767,17 +1774,17 @@ window.sidebarQuickAttendance = async function(kind) {
     // with a custom displayed role label (their actual stored position
     // is untouched — this only affects how it's shown on the box view).
     const EMPLOYEE_BOX_OVERRIDE = {
-      'BC-2023-006': { box: 'Information Technology Department', roleLabel: 'IT Advisor' }, // Anton Bautista
-      'BC-2023-004': { box: 'Accountancy Department' },   // Jose Villanueva
-      'BC-2023-005': { box: 'Business Department' },      // Wilma Mondragon
-      'BC-2023-008': { box: null },   // Ricardo Fernandez — not shown yet; Engineering has no confirmed staff
-      'BC-2023-003': { box: 'Educational Department' },   // Maria Cruz
-      'BC-2023-007': { box: 'Educational Department' },   // Lorna Del Rosario
-      'BC-2023-010': { box: 'Educational Department' },   // Mark Tan
-      'BC-2023-001': { box: 'Educational Department' },   // Emma Santos
-      'BC-2023-002': { box: 'Educational Department' },   // Carlos Reyes
-      'BC-2023-009': { box: 'Educational Department' }    // Sarah Lim
-    };
+  '6':  { box: 'Information Technology Department', roleLabel: 'IT Advisor' },
+  '4':  { box: 'Accountancy Department' },
+  '5':  { box: 'Business Department' },
+  '8':  { box: null },
+  '3':  { box: 'Educational Department' },
+  '7':  { box: 'Educational Department' },
+  '10': { box: 'Educational Department' },
+  '1':  { box: 'Educational Department' },
+  '2':  { box: 'Educational Department' },
+  '9':  { box: 'Educational Department' }
+};
 
     // Fallback department-name matching, used only when no override above.
     const DEPT_TO_BOX = {
@@ -1933,7 +1940,7 @@ window.sidebarQuickAttendance = async function(kind) {
       const list = (q ? employees.filter(e => {
         const s = (e.first + ' ' + e.last + ' ' + e.id + ' ' + e.department + ' ' + e.position).toLowerCase();
         return s.includes(q.toLowerCase());
-      }) : employees).slice().sort((a, b) => (a.first + a.last).localeCompare(b.first + b.last));
+      }) : employees).slice().sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
       return `
             <div class="page-header-flex">
               <div>
@@ -3252,7 +3259,7 @@ window.sidebarQuickAttendance = async function(kind) {
                   <div class="field"><label>First Name</label><input id="f_first" type="text" /></div>
                   <div class="field"><label>Middle Name</label><input id="f_middle" type="text" /></div>
                   <div class="field"><label>Last Name</label><input id="f_last" type="text" /></div>
-                  <div class="field"><label>Employee ID</label><input id="f_id" type="text" placeholder="BC-2028-0##" /></div>
+                  <div class="field"><label>Employee ID</label><input id="f_id" type="text" value="Auto-generated" disabled style="background:#eef0f8;color:var(--sub);" /></div>
                   <div class="field"><label>Date of Birth</label><input id="f_dob" type="date" /></div>
                   <div class="field"><label>Gender</label>
                     <select id="f_gender"><option>Female</option><option>Male</option><option>Prefer not to say</option></select>
@@ -3334,10 +3341,9 @@ window.sidebarQuickAttendance = async function(kind) {
         showToast('Email is required — it is the employee\'s login username', 'fa-triangle-exclamation');
         return;
       }
-      const id = document.getElementById('f_id').value.trim() || ('BC-2028-' + String(employees.length + 1).padStart(3, '0'));
       const dept = document.getElementById('f_department').value;
-      const newEmp = {
-        id, first,
+        const newEmp = {
+        first,
         password: portalPassword,
         middle: document.getElementById('f_middle').value.trim(),
         last,
@@ -3379,7 +3385,7 @@ window.sidebarQuickAttendance = async function(kind) {
               <div style="text-align:center;">
                 <div class="success-tick"><i class="fas fa-check"></i></div>
                 <h2 style="margin:0 0 6px;">Employee Added!</h2>
-                <p style="color:var(--sub);margin:0 0 4px;">${first} ${last} has been added to ${dept}.</p>
+                <p style="color:var(--sub);margin:0 0 4px;">${first} ${last} (ID: ${savedEmp.id}) has been added to ${dept}.</p>
                 ${pwdBlock}
                 <button class="btn btn-navy" style="width:100%;" onclick="closeModal(); goTo('employees');">View Employees</button>
               </div>
@@ -4406,15 +4412,15 @@ function employeeAttendancePage() {
   { key: 'performance', label: 'Performance Evaluation Report', icon: 'fa-star', desc: 'Roles, duties, and evaluation scores per employee.' }
   ];
 
-    function reportTypeCardHTML(rt) {
-      const active = selectedReportType === rt.key;
-      return `
-        <div class="report-type-card ${active ? 'active' : ''}" onclick="selectReportType('${rt.key}')">
-          <div class="rtc-icon"><i class="fas ${rt.icon}"></i></div>
-          <div class="rtc-title">${rt.label}</div>
-          <div class="rtc-desc">${rt.desc}</div>
-        </div>`;
-    }
+    function reportTypeCardHTML(rt, num) {
+  const active = selectedReportType === rt.key;
+  return `
+    <div class="report-type-card ${active ? 'active' : ''}" onclick="selectReportType('${rt.key}')">
+      <div class="rtc-icon"><i class="fas ${rt.icon}"></i></div>
+      <div class="rtc-title">${num}. ${rt.label}</div>
+      <div class="rtc-desc">${rt.desc}</div>
+    </div>`;
+}
 
     window.selectReportType = function(key) {
       selectedReportType = (selectedReportType === key) ? null : key;
@@ -4437,7 +4443,7 @@ function employeeAttendancePage() {
               <button class="btn btn-navy" onclick="showNewReportModal()"><i class="fas fa-plus"></i> New Evaluation</button>
             </div>
             <div class="report-type-grid">
-              ${REPORT_TYPES.map(rt => reportTypeCardHTML(rt)).join('')}
+            ${REPORT_TYPES.map((rt, i) => reportTypeCardHTML(rt, i + 1)).join('')}
             </div>
             ${selectedReportType ? reportContentPanelHTML() : `
               <div class="panel" style="text-align:center;padding:54px 20px;">
@@ -4514,35 +4520,24 @@ function employeeAttendancePage() {
   }).join('');
 }
 
-        function attendanceReportBodyHTML() {
+function attendanceReportBodyHTML() {
   const rows = todayAttendanceStatus.length ? todayAttendanceStatus : attendanceLogs;
-  const present = rows.filter(r => r.status === 'Present').length;
-  const late = rows.filter(r => r.status === 'Late').length;
-  const undertime = rows.filter(r => r.status === 'Undertime').length;
-  const absent = rows.filter(r => r.status === 'Absent').length;
-  const onLeave = rows.filter(r => r.status === 'On Leave').length;
-  const exceptions = rows.filter(r => r.status === 'Late' || r.status === 'Undertime' || r.status === 'Absent');
+  const count = s => rows.filter(r => r.status === s).length;
   const cls = s => s==='Present' ? 'pill-active' : (s==='Late' ? 'pill-leave' : (s==='Undertime' ? 'pill-undertime' : (s==='Absent' ? 'pill-inactive' : 'pill-leave')));
-  const rowHTML = l => `<tr><td>${l.name}</td><td>${l.department}</td><td>${l.timeIn||'-'}</td><td>${l.timeOut||'-'}</td><td><span class="pill ${cls(l.status)}">${l.status}</span></td></tr>`;
-  const head = `<thead><tr><th>Employee</th><th>Department</th><th>Time In</th><th>Time Out</th><th>Status</th></tr></thead>`;
   return `
     <div class="attendance-summary-box" style="margin-bottom:16px;">
-      <div class="as-item"><div class="as-num">${present}</div><div class="as-lbl">Present</div></div>
-      <div class="as-item"><div class="as-num">${late}</div><div class="as-lbl">Late</div></div>
-      <div class="as-item"><div class="as-num">${undertime}</div><div class="as-lbl">Undertime</div></div>
-      <div class="as-item"><div class="as-num">${absent}</div><div class="as-lbl">Absent</div></div>
-      <div class="as-item"><div class="as-num">${onLeave}</div><div class="as-lbl">On Leave</div></div>
+      <div class="as-item"><div class="as-num">${count('Present')}</div><div class="as-lbl">Present</div></div>
+      <div class="as-item"><div class="as-num">${count('Late')}</div><div class="as-lbl">Late</div></div>
+      <div class="as-item"><div class="as-num">${count('Undertime')}</div><div class="as-lbl">Undertime</div></div>
+      <div class="as-item"><div class="as-num">${count('Absent')}</div><div class="as-lbl">Absent</div></div>
+      <div class="as-item"><div class="as-num">${count('On Leave')}</div><div class="as-lbl">On Leave</div></div>
     </div>
-    <table>${head}<tbody>
-      ${rows.length ? rows.map(rowHTML).join('') : `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-fingerprint"></i><p>No attendance data for today.</p></div></td></tr>`}
-    </tbody></table>
-    <div style="margin-top:24px;padding-top:18px;border-top:2px solid #d9dcea;">
-      <strong style="font-size:14px;">Late, Undertime &amp; Absences</strong>
-      <span style="color:#6b7085;font-size:12px;margin-left:8px;">${exceptions.length} record(s) today</span>
-      <table style="margin-top:10px;">${head}<tbody>
-        ${exceptions.length ? exceptions.map(rowHTML).join('') : `<tr><td colspan="5" style="text-align:center;color:#6b7085;padding:18px;">No late, undertime, or absent records for today.</td></tr>`}
-      </tbody></table>
-    </div>
+    <table>
+      <thead><tr><th>Employee</th><th>Department</th><th>Time In</th><th>Time Out</th><th>Status</th></tr></thead>
+      <tbody>
+        ${rows.length ? rows.map(l => `<tr><td>${l.name}</td><td>${l.department}</td><td>${l.timeIn||'-'}</td><td>${l.timeOut||'-'}</td><td><span class="pill ${cls(l.status)}">${l.status}</span></td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-fingerprint"></i><p>No attendance data for today.</p></div></td></tr>`}
+      </tbody>
+    </table>
   `;
 }
 

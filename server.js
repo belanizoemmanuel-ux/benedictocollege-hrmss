@@ -493,6 +493,12 @@ function emailMatch(email) {
   return { $regex: new RegExp('^' + clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
 }
 
+// Next employee ID: 1, 2, 3... (looks at active AND separated so IDs are never reused)
+async function nextEmployeeId() {
+  const [a, b] = await Promise.all([Employee.find({}, { id: 1 }), Separated.find({}, { id: 1 })]);
+  const nums = [...a, ...b].map(x => String(x.id || '')).filter(s => /^\d+$/.test(s)).map(Number);
+  return String((nums.length ? Math.max(...nums) : 0) + 1);
+}
 
 // ─── Auth Routes ───
 app.post('/api/auth/login', async (req, res) => {
@@ -570,9 +576,29 @@ app.get('/api/employees/by-email/:email', async (req, res) => {
   }
 });
 
+app.post('/api/admin/renumber-employee-ids', async (req, res) => {
+  try {
+    const all = [...await Employee.find(), ...await Separated.find()];
+    const isNum = s => /^\d+$/.test(String(s));
+    let next = Math.max(0, ...all.filter(x => isNum(x.id)).map(x => Number(x.id))) + 1;
+    const todo = all.filter(x => !isNum(x.id))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+    const map = {};
+    for (const x of todo) map[x.id] = String(next++);
+    for (const [oldId, newId] of Object.entries(map)) {
+      await Employee.updateMany({ id: oldId }, { id: newId });
+      await Separated.updateMany({ id: oldId }, { id: newId });
+      await AttendanceLog.updateMany({ employeeId: oldId }, { employeeId: newId });
+      await Report.updateMany({ employeeId: oldId }, { employeeId: newId });
+    }
+    res.json({ success: true, map });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/employees', async (req, res) => {
   try {
-    const { password, ...empData } = req.body;   // keep password out of the Employee record
+    const { password, id: _ignoreId, ...empData } = req.body;   // ignore any ID sent by the browser
+    empData.id = await nextEmployeeId();                         // auto 1, 2, 3...
     const emp = new Employee(empData);
     await emp.save();
     await Department.updateOne({ name: emp.department }, { $inc: { count: 1 } });
@@ -1491,6 +1517,26 @@ app.delete('/api/reports/:id', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete report' });
   }
+});
+
+// TEMPORARY: renumber old IDs (BC-2023-001 -> 1 ...). Delete after running once.
+app.post('/api/admin/renumber-employee-ids', async (req, res) => {
+  try {
+    const all = [...await Employee.find(), ...await Separated.find()];
+    const isNum = s => /^\d+$/.test(String(s));
+    let next = Math.max(0, ...all.filter(x => isNum(x.id)).map(x => Number(x.id))) + 1;
+    const todo = all.filter(x => !isNum(x.id))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+    const map = {};
+    for (const x of todo) map[x.id] = String(next++);
+    for (const [oldId, newId] of Object.entries(map)) {
+      await Employee.updateMany({ id: oldId }, { id: newId });
+      await Separated.updateMany({ id: oldId }, { id: newId });
+      await AttendanceLog.updateMany({ employeeId: oldId }, { employeeId: newId });
+      await Report.updateMany({ employeeId: oldId }, { employeeId: newId });
+    }
+    res.json({ success: true, map });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Test endpoint ───
