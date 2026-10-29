@@ -6,6 +6,7 @@
   <title>Benedicto College – HR Management</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="icon" type="image/png" href="/logo.png" />
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -841,7 +842,22 @@
   <script>
 
     const BACKEND_URL = 'https://benedictocollege-hrmss-1.onrender.com';
+    // Automatically attach the login token to every API request
+const _origFetch = window.fetch.bind(window);
+window.fetch = function (url, opts = {}) {
+  if (String(url).startsWith(API_BASE_URL)) {
+    const token = localStorage.getItem('bc_token');
+    if (token) opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } };
+  }
+  return _origFetch(url, opts).then(res => {
+    if (res.status === 401 && currentUser && !String(url).includes('/auth/login')) {
+      handleLogout(); // token expired or invalid
+    }
+    return res;
+  });
+};
 const API_BASE_URL = BACKEND_URL + '/api';
+
     // ═══════════════════════════════════════════════════════════════════
 
     const POSITION_DUTIES = {
@@ -1041,24 +1057,32 @@ setInterval(syncPhTime, 5 * 60 * 1000);
     }
 
     async function loadData() {
-      try {
-        employees = await fetch(`${API_BASE_URL}/employees`).then(r => r.json());
-        departments = await fetch(`${API_BASE_URL}/departments`).then(r => r.json());
-        leaveRequests = await fetch(`${API_BASE_URL}/leave-requests`).then(r => r.json());
-        complaints = await fetch(`${API_BASE_URL}/complaints`).then(r => r.json());
-        announcements = await fetch(`${API_BASE_URL}/announcements`).then(r => r.json());
-        activities = await fetch(`${API_BASE_URL}/activities`).then(r => r.json());
-        attendanceLogs = await fetch(`${API_BASE_URL}/attendance?date=${todayStr()}`).then(r => r.json());
-        separated = await fetch(`${API_BASE_URL}/separated`).then(r => r.json());
-        reports = await fetch(`${API_BASE_URL}/reports`).then(r => r.json());
-      } catch (err) {
-        console.error('Failed to load data:', err);
-        showToast('Failed to load data from server', 'fa-triangle-exclamation');
-      }
-    }
+  const get = async (path) => {
+    try {
+      const r = await fetch(`${API_BASE_URL}${path}`);
+      if (!r.ok) return [];
+      const d = await r.json();
+      return Array.isArray(d) ? d : [];
+    } catch (e) { return []; }
+  };
+  const isAdmin = currentUser && currentUser.role === 'admin';
+  try {
+    [employees, leaveRequests, complaints, announcements, attendanceLogs, reports] = await Promise.all([
+      get('/employees'), get('/leave-requests'), get('/complaints'),
+      get('/announcements'), get(`/attendance?date=${todayStr()}`), get('/reports')
+    ]);
+    [departments, activities, separated] = isAdmin
+      ? await Promise.all([get('/departments'), get('/activities'), get('/separated')])
+      : [[], [], []];
+  } catch (err) {
+    console.error('Failed to load data:', err);
+    showToast('Failed to load data from server', 'fa-triangle-exclamation');
+  }
+}
 
     async function reloadAndRender() {
       await loadData();
+      if (!currentUser) return;
       renderPage();
       renderSidebar();
       renderNotifications();
@@ -1278,6 +1302,7 @@ window.sidebarQuickAttendance = async function(kind) {
       document.getElementById('app').className = currentUser.role === 'admin' ? 'role-admin' : 'role-employee';
 
       await loadData();
+      if (!currentUser) return;
       renderSidebar();
       refreshSidebarQuick();
       renderPage();

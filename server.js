@@ -4,29 +4,140 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
+const jwt = require('jsonwebtoken');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const bcrypt = require('bcryptjs');
 
 const app = express();
-
-const bcrypt = require('bcryptjs');
+app.set('trust proxy', 1); // Render runs behind a proxy
 
 // True if the string already looks like a bcrypt hash
 function isHashed(str) {
   return /^\$2[aby]\$\d{2}\$/.test(String(str || ''));
 }
 
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  console.error('❌ JWT_SECRET is missing or too short (use 32+ chars).');
+  process.exit(1);
+}
+
+app.use(helmet({ contentSecurityPolicy: false }));
+
+// ── CORS: only your own sites ──
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'https://hrbenedicto.com,https://www.hrbenedicto.com')
+  .split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({
-  origin: '*',
+  origin: (origin, cb) => (!origin || allowedOrigins.includes(origin))
+    ? cb(null, true) : cb(new Error('Not allowed by CORS')),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json({ limit: '15mb' }));
 
-// Serve your HTML, CSS, JS, images, etc.
-app.use(express.static(path.join(__dirname)));
+// ── Serve ONLY the public folder (never the whole project) ──
+const PUBLIC_DIR = path.join(__dirname, 'public');
+app.use(express.static(PUBLIC_DIR));
+app.use('/public', express.static(PUBLIC_DIR));
 
-// ─────────────────────────────────────
-// MONGODB
+// ═══════════ AUTH + ROLE PROTECTION ═══════════
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many login attempts. Try again in 15 minutes.' } });
+app.use('/api/auth/login', loginLimiter);
+
+function requireAuth(req, res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  try {
+    req.user = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    next();
+  } catch (e) {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+// Only these routes work without a token
+const PUBLIC_PATHS = ['/time', '/auth/login'];
+app.use('/api', (req, res, next) => PUBLIC_PATHS.includes(req.path) ? next() : requireAuth(req, res, next));
+
+// Routes an employee may call. Everything else is admin-only.
+const EMPLOYEE_ROUTES = [
+  ['GET',  /^\/employees$/],
+  ['PUT',  /^\/employees\/[^/]+$/],
+  ['GET',  /^\/announcements$/],
+  ['GET',  /^\/leave-requests$/],
+  ['POST', /^\/leave-requests\/submit$/],
+  ['GET',  /^\/complaints$/],
+  ['POST', /^\/complaints$/],
+  ['GET',  /^\/attendance$/],
+  ['GET',  /^\/attendance\/status-today$/],
+  ['POST', /^\/attendance\/time-in$/],
+  ['POST', /^\/attendance\/time-out$/],
+  ['GET',  /^\/attendance\/employee\/[^/]+\/[^/]+$/],
+  ['GET',  /^\/reports$/],
+  ['POST', /^\/auth\/change-password$/]
+];
+
+app.use('/api', async (req, res, next) => {
+  if (PUBLIC_PATHS.includes(req.path) || req.user.role === 'admin') return next();
+  try {
+    const m = req.method, p = req.path;
+    if (!EMPLOYEE_ROUTES.some(([method, rx]) => method === m && rx.test(p))) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const account = await User.findById(req.user.id);
+    const me = account && await Employee.findOne({ email: emailMatch(account.email) });
+    if (!me) return res.status(403).json({ error: 'Employee record not found or deactivated' });
+
+    // keep only the caller's own rows in any list response
+    const only = fn => { const j = res.json.bind(res); res.json = d => j(Array.isArray(d) ? d.filter(fn) : d); };
+    const mine = v => String(v || '').trim().toLowerCase() === me.email.trim().toLowerCase();
+
+    if (m === 'GET' && p === '/employees') return res.json([me]);
+    if (m === 'PUT' && /^\/employees\/[^/]+$/.test(p)) {
+      if (p.split('/')[2] !== me.id) return res.status(403).json({ error: 'You can only edit your own profile' });
+      const SAFE = ['first', 'middle', 'last', 'dob', 'gender', 'phone', 'photo']; // no salary/position/department/email
+      req.body = Object.fromEntries(SAFE.filter(k => k in (req.body || {})).map(k => [k, req.body[k]]));
+    }
+    if (m === 'GET' && p === '/leave-requests') only(l => mine(l.email));
+    if (m === 'POST' && p === '/leave-requests/submit') {
+      req.body.email = me.email; req.body.name = `${me.first} ${me.last}`; req.body.dept = me.department;
+    }
+    if (m === 'GET' && p === '/complaints') only(c => mine(c.employee));
+    if (m === 'POST' && p === '/complaints') {
+      const b = req.body || {};
+      req.body = { subject: b.subject, priority: b.priority, date: b.date, status: 'Pending', employee: me.email };
+    }
+    if (m === 'GET' && (p === '/attendance' || p === '/attendance/status-today')) only(l => l.employeeId === me.id);
+    if (m === 'GET' && p === '/reports') only(r => r.employeeId === me.id);
+    if ((m === 'POST') && (p === '/attendance/time-in' || p === '/attendance/time-out')) req.body.employeeId = me.id;
+    if (m === 'GET' && p.startsWith('/attendance/employee/') && p.split('/')[3] !== me.id) {
+      return res.status(403).json({ error: 'Not your attendance records' });
+    }
+    next();
+  } catch (err) {
+    console.error('Scope error:', err.message);
+    res.status(500).json({ error: 'Authorization failed' });
+  }
+});
+
+// Change your own password (works for admin and employees)
+app.post('/api/auth/change-password', async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (String(newPassword || '').length < 10) return res.status(400).json({ error: 'New password must be at least 10 characters' });
+    const user = await User.findById(req.user.id);
+    if (!user || !(await bcrypt.compare(String(currentPassword || ''), user.password))) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    user.password = await bcrypt.hash(newPassword, 12);
+    await user.save();
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'Failed to change password' }); }
+});
+// ═══════════ END AUTH BLOCK ═══════════
 // ─────────────────────────────────────
 const DB_NAME = 'HR-Admin-Database';
 
@@ -200,8 +311,8 @@ async function seed() {
     const userCount = await User.countDocuments();
     if (userCount === 0) {
       await User.insertMany([
-      { name: 'HR Admin', email: 'admin@benedicto.edu', password: bcrypt.hashSync('ChangeThisNow#2026', 12), role: 'admin', phone: '0917-555-0000', position: 'HR Manager' },
-      { name: 'Emma Santos', email: 'emma.santos@benedicto.edu', password: bcrypt.hashSync('ChangeThisToo#2026', 12), role: 'employee' }
+      { name: 'HR Admin', email: 'admin@benedicto.edu', password: bcrypt.hashSync(process.env.ADMIN_INITIAL_PASSWORD || require('crypto').randomBytes(12).toString('hex'), 12), role: 'admin', phone: '0917-555-0000', position: 'HR Manager' },
+      { name: 'Emma Santos', email: 'emma.santos@benedicto.edu', password: bcrypt.hashSync(process.env.EMPLOYEE_INITIAL_PASSWORD || require('crypto').randomBytes(12).toString('hex'), 12), role: 'employee' }
       ]);
       console.log('✅ Default users created');
     }
@@ -406,9 +517,14 @@ app.post('/api/auth/login', async (req, res) => {
     const isSeparated = await Separated.findOne({ email: emailMatch(user.email) });
     if (isSeparated) return res.status(403).json({ error: 'This account is deactivated. Please contact HR.' });
 
+        const token = jwt.sign(
+      { id: user._id.toString(), role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '8h', algorithm: 'HS256' }
+    );
     res.json({
       user: { name: user.name, email: user.email, role: user.role, phone: user.phone, position: user.position, photo: user.photo },
-      token: 'demo-token-' + user._id
+      token
     });
     } catch (error) {
     console.error('Login error:', error.message);
@@ -442,11 +558,6 @@ app.get('/api/employees', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch employees' });
   }
-});
-
-app.get('/api/dev/clear-today-attendance', async (req, res) => {
-  const result = await AttendanceLog.deleteMany({ date: manilaNow().date });
-  res.json({ deleted: result.deletedCount });
 });
 
 app.get('/api/employees/by-email/:email', async (req, res) => {
@@ -529,69 +640,6 @@ app.put('/api/employees/:id/password', async (req, res) => {
   } catch (error) {
     console.error('Password reset error:', error);
     res.status(500).json({ error: 'Failed to update password' });
-  }
-});
-
-
-// HR attaches a photo (and optionally time in/out rows read from it)
-app.post('/api/attendance/biometric-import', async (req, res) => {
-  try {
-    const { fileName, image, rawText, importedBy, rows = [], assignedTo = [] } = req.body;
-    if (!image) return res.status(400).json({ error: 'Please attach a photo' });
-
-    let saved = 0;
-    const storedRows = [];
-
-    for (const r of rows) {
-      const row = {
-        employeeId: r.employeeId || '', name: r.name || '', department: r.department || '',
-        position: r.position || '', date: r.date || '', timeIn: r.timeIn || '', timeOut: r.timeOut || '',
-        status: '', matched: false
-      };
-      try {
-        const emp = r.include && r.employeeId ? await Employee.findOne({ id: r.employeeId }) : null;
-        if (emp && r.date && (r.timeIn || r.timeOut)) {
-          let log = await AttendanceLog.findOne({ employeeId: emp.id, date: r.date });
-          if (!log) {
-            log = new AttendanceLog({ employeeId: emp.id, name: `${emp.first} ${emp.last}`, department: emp.department, date: r.date, timeIn: null, timeOut: null, status: 'Present' });
-          }
-          if (r.timeIn) log.timeIn = r.timeIn;
-          if (r.timeOut) log.timeOut = r.timeOut;
-          if (log.timeIn) log.status = parseTimeToHourFloat(log.timeIn) > 8 ? 'Late' : 'Present';
-          if (log.timeOut && parseTimeToHourFloat(log.timeOut) < 18) log.status = 'Undertime';
-          log.source = 'Biometric Photo';
-          await log.save();
-          row.status = log.status;
-          row.matched = true;
-          row.name = `${emp.first} ${emp.last}`;
-          row.department = emp.department;
-          row.position = emp.position;
-          saved++;
-        }
-      } catch (rowErr) {
-        console.error('Biometric row skipped:', rowErr.message);
-      }
-      storedRows.push(row);
-    }
-
-    await BiometricImport.create({
-      fileName: fileName || 'biometric-photo',
-      image, rawText: rawText || '', importedBy: importedBy || 'HR Admin',
-      savedCount: saved, assignedTo, rows: storedRows
-    });
-
-    try {
-      await Activity.create({
-        icon: 'fa-fingerprint',
-        text: `Biometric photo attached` + (saved ? ` — ${saved} attendance record(s) updated` : '') + (assignedTo.length ? `, shown to ${assignedTo.length} employee(s)` : ''),
-        when: 'just now'
-      });
-    } catch (e) {}
-
-    res.json({ success: true, saved });
-  } catch (error) {
-    console.error('Biometric import error:', error);
-    res.status(500).json({ error: 'Failed to import biometric photo: ' + error.message });
   }
 });
 
@@ -1451,7 +1499,7 @@ app.get('/api/test', (req, res) => {
 });
 
 // ─── Start ───
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 const PORT = process.env.PORT || 3000;
 
