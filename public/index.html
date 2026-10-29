@@ -1147,18 +1147,11 @@ keepPhTimeSynced();
     errEl.textContent = 'Unable to connect to the HR server. Please check your internet connection and try again.';
     errEl.classList.add('show');
   }
-function showSplash(text) {
+}
+  function showSplash(text) {
   const lt = document.getElementById('loginTransition');
   if (!lt) return;
   lt.querySelector('.lt-text').textContent = text || 'Signing you in…';
-
-  // restart the logo animation every time the splash is shown
-  lt.querySelectorAll('.lt-badge, .lt-badge img, .lt-text').forEach(el => {
-    el.style.animation = 'none';
-    void el.offsetWidth;          // forces the browser to reset it
-    el.style.animation = '';      // back to the CSS animation, which now plays again
-  });
-
   lt.classList.add('show');
 }
 function hideSplash() {
@@ -4867,8 +4860,8 @@ function announcementsReportBodyHTML() {
       openModal(`
         <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
         <h2 style="margin-top:0;">New Performance Report</h2>
-        <div class="field"><label>Employee</label><select id="rep_emp_new" onchange="clearAttendancePreview()">${employees.map(e => `<option value="${e.id}">${e.first} ${e.last} (${e.id})</option>`).join('')}</select></div>
-        <button class="btn btn-outline" style="width:100%;margin-bottom:14px;" onclick="autoFillReportFromAttendance()"><i class="fas fa-magic"></i> Auto-Generate from Attendance</button>
+        <div class="field"><label>Employee</label><select id="rep_emp_new" onchange="autoFillReportFromAttendance(true)">${employees.map(e => `<option value="${e.id}">${e.first} ${e.last} (${e.id})</option>`).join('')}</select></div>
+        <button class="btn btn-outline" style="width:100%;margin-bottom:14px;" onclick="autoFillReportFromAttendance()"><i class="fas fa-magic"></i> Regenerate from Attendance</button>
         <div id="attendancePreview" style="display:none;margin-bottom:14px;">
           <div style="font-size:11px;font-weight:700;color:var(--navy-light);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Attendance Summary</div>
           <div id="attendancePreviewContent"></div>
@@ -4880,6 +4873,7 @@ function announcementsReportBodyHTML() {
           <div class="field"><label>Status</label><select id="rep_status_new"><option>Draft</option><option>Finalized</option></select></div>
         </div>
         <div class="field"><label>Evaluator</label><input id="rep_evaluator_new" type="text" value="${currentUser.name}" /></div>
+        <p style="font-size:12px;color:var(--sub);margin:0 0 10px;"><i class="fas fa-circle-info"></i> Strengths, Areas for Improvement and Goals are generated from the employee's attendance. You can edit, delete or rewrite any of them before saving.</p>
         <div class="field"><label>Strengths</label><textarea id="rep_strengths_new" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#f6f7fb;font-family:inherit;font-size:13.5px;min-height:60px;" placeholder="List employee strengths..."></textarea></div>
         <div class="field"><label>Areas for Improvement</label><textarea id="rep_improvements_new" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#f6f7fb;font-family:inherit;font-size:13.5px;min-height:60px;" placeholder="List areas for improvement..."></textarea></div>
         <div class="field"><label>Goals for Next Period</label><textarea id="rep_goals_new" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#f6f7fb;font-family:inherit;font-size:13.5px;min-height:60px;" placeholder="Set goals for next evaluation period..."></textarea></div>
@@ -4888,33 +4882,75 @@ function announcementsReportBodyHTML() {
           <button class="btn btn-navy" style="flex:1" onclick="submitNewReport()"><i class="fas fa-plus"></i> Create Report</button>
         </div>
       `, true);
+      autoFillReportFromAttendance(true);
     };
 
-    window.autoFillReportFromAttendance = async function() {
-      const empId = document.getElementById('rep_emp_new').value;
-      const emp = employees.find(e => e.id === empId);
-      if (!emp) return;
-      try {
-        const stats = await fetch(`${API_BASE_URL}/attendance/stats/${empId}`).then(r => r.json());
-        lastAttendanceStats = Object.assign({ employeeId: empId }, stats);
+    let _autoFillSeq = 0;
 
-        const avgRating = Math.round((stats.suggestedRatings.punctuality + stats.suggestedRatings.professionalism + stats.suggestedRatings.reliability + stats.suggestedRatings.collaboration) / 4) || 3;
-        document.getElementById('rep_rating_new').value = avgRating;
-        document.getElementById('rep_strengths_new').value = `Attendance Rate: ${stats.attendanceRate}%. Present: ${stats.present} days, Late: ${stats.late} days, Absent: ${stats.absent} days out of ${stats.totalDays} recorded days.` + (stats.attendanceRate >= 90 ? ' Consistently reliable attendance.' : '');
-        document.getElementById('rep_improvements_new').value = stats.late > 0
-          ? `Employee was late ${stats.late} time(s). Punctuality needs improvement.`
-          : (stats.absent > 0 ? `Employee was absent ${stats.absent} time(s) during this period.` : 'No major attendance-related concerns.');
-        document.getElementById('rep_goals_new').value = `Maintain or improve attendance rate above ${Math.min(100, stats.attendanceRate + 5)}%.`;
+// Builds HR-style wording from the attendance numbers. HR can edit all of it afterwards.
+function buildAttendanceNarrative(stats, name) {
+  const total = stats.totalDays || 0;
+  const present = stats.present || 0, late = stats.late || 0, absent = stats.absent || 0;
+  const undertime = Math.max(total - present - late - absent, 0);
+  const rate = stats.attendanceRate || 0;
+  const strengths = [], improvements = [], goals = [];
 
-        const preview = document.getElementById('attendancePreview');
-        const content = document.getElementById('attendancePreviewContent');
-        content.innerHTML = attendanceSummaryBox({ attendanceRate: stats.attendanceRate, punctualityRate: stats.punctualityRate, present: stats.present, late: stats.late, absent: stats.absent });
-        preview.style.display = 'block';
-        showToast('Report auto-filled from attendance data');
-      } catch (err) {
-        showToast('Failed to fetch attendance data', 'fa-triangle-exclamation');
-      }
-    };
+  if (!total) {
+    strengths.push(`No attendance records are on file for ${name} yet, so there is no attendance data to draw from.`);
+    improvements.push('Attendance-related concerns cannot be assessed until attendance records are available.');
+    goals.push('Time in and time out daily so attendance can be properly monitored and evaluated.');
+  } else {
+    strengths.push(`${name} has ${present} on-time day(s), ${late} late day(s) and ${absent} absence(s) out of ${total} recorded working day(s), with an attendance rate of ${rate}%.`);
+    if (rate >= 95) strengths.push('Shows excellent attendance and dependability.');
+    else if (rate >= 85) strengths.push('Shows good attendance and is generally dependable.');
+    if (late === 0) strengths.push('Consistently reports on time.');
+    if (absent === 0) strengths.push('No absences were recorded in this period.');
+
+    if (late > 0) improvements.push(`Recorded ${late} late arrival(s). Punctuality needs improvement; report on or before the official start time.`);
+    if (absent > 0) improvements.push(`Recorded ${absent} absence(s). File leave requests in advance whenever an absence is unavoidable.`);
+    if (undertime > 0) improvements.push(`Recorded ${undertime} undertime day(s). Complete the full working hours before timing out.`);
+    if (rate < 85) improvements.push('Overall attendance is below the expected standard and will need closer monitoring.');
+    if (!late && !absent && !undertime && rate >= 85) improvements.push('No significant attendance-related concerns were noted in this period.');
+
+    if (rate >= 95) goals.push('Maintain an attendance rate of at least 95% in the next evaluation period.');
+    else goals.push(`Raise the attendance rate to at least ${Math.min(100, Math.max(90, rate + 5))}% in the next evaluation period.`);
+    if (late > 0) goals.push('Reduce late arrivals to zero by reporting on time every working day.');
+    if (absent > 0) goals.push('Keep absences to a minimum and file leave requests in advance.');
+    if (undertime > 0) goals.push('Avoid undertime by completing the required working hours each day.');
+  }
+  return { strengths: strengths.join(' '), improvements: improvements.join(' '), goals: goals.join(' ') };
+}
+
+window.autoFillReportFromAttendance = async function(silent) {
+  const sel = document.getElementById('rep_emp_new');
+  if (!sel) return;
+  const empId = sel.value;
+  const emp = employees.find(e => e.id === empId);
+  if (!emp) return;
+  const mySeq = ++_autoFillSeq;
+  try {
+    const stats = await fetch(`${API_BASE_URL}/attendance/stats/${empId}`).then(r => r.json());
+    const stillThere = document.getElementById('rep_emp_new');
+    if (mySeq !== _autoFillSeq || !stillThere || stillThere.value !== empId) return;  // employee changed meanwhile
+    if (!stats || !stats.suggestedRatings) throw new Error('No attendance stats returned');
+    lastAttendanceStats = Object.assign({ employeeId: empId }, stats);
+
+    const avgRating = Math.round((stats.suggestedRatings.punctuality + stats.suggestedRatings.professionalism + stats.suggestedRatings.reliability + stats.suggestedRatings.collaboration) / 4) || 3;
+    const text = buildAttendanceNarrative(stats, emp.first);
+    document.getElementById('rep_rating_new').value = avgRating;
+    document.getElementById('rep_strengths_new').value = text.strengths;
+    document.getElementById('rep_improvements_new').value = text.improvements;
+    document.getElementById('rep_goals_new').value = text.goals;
+
+    const preview = document.getElementById('attendancePreview');
+    const content = document.getElementById('attendancePreviewContent');
+    content.innerHTML = attendanceSummaryBox({ attendanceRate: stats.attendanceRate, punctualityRate: stats.punctualityRate, present: stats.present, late: stats.late, absent: stats.absent });
+    preview.style.display = 'block';
+    if (!silent) showToast('Regenerated from attendance data');
+  } catch (err) {
+    showToast('Could not load attendance data — you can type the evaluation manually', 'fa-triangle-exclamation');
+  }
+};
 
     window.clearAttendancePreview = function() {
       lastAttendanceStats = null;
