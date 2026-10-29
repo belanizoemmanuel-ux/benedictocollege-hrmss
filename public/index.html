@@ -1152,11 +1152,15 @@ keepPhTimeSynced();
   const lt = document.getElementById('loginTransition');
   if (!lt) return;
   lt.querySelector('.lt-text').textContent = text || 'Signing you in…';
+
+  // restart the logo animation every time the splash is shown
+  lt.querySelectorAll('.lt-badge, .lt-badge img, .lt-text').forEach(el => {
+    el.style.animation = 'none';
+    void el.offsetWidth;          // forces the browser to reset it
+    el.style.animation = '';      // back to the CSS animation, which now plays again
+  });
+
   lt.classList.add('show');
-}
-function hideSplash() {
-  const lt = document.getElementById('loginTransition');
-  if (lt) lt.classList.remove('show');
 }
 
 async function handleLogin(email, password) {
