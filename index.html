@@ -1675,7 +1675,7 @@ window.sidebarQuickAttendance = async function(kind) {
       const onLeave = employees.filter(e => e.status === 'On Leave').length;
       const deptCount = departments.length;
       return `
-            <h1 class="page-title">Login Page, ${currentUser.name}!</h1>
+            <h1 class="page-title">Welcome back, ${currentUser.name}!</h1>
             <p class="page-sub">Here's what's happening at Benedicto College today.</p>
                         <div class="info-cards">
               <div class="info-card">
@@ -3580,7 +3580,7 @@ window.sidebarQuickAttendance = async function(kind) {
       const e = getCurrentEmployee();
       if (!e) return `<div class="panel"><div class="empty-state"><i class="fas fa-user-slash"></i><p>Employee record not found.</p></div></div>`;
       return `
-            <h1 class="page-title">Login Page, ${e.first}!</h1>
+            <h1 class="page-title">Welcome back, ${e.first}!</h1>
             <p class="page-sub">Your employment overview.</p>
                         <div class="info-cards">
               <div class="info-card">
