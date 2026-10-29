@@ -992,12 +992,25 @@ function phNowMs() { return phClock.baseMs + (performance.now() - phClock.basePe
 async function syncPhTime() {
   try {
     const t0 = performance.now();
-    const data = await fetch(`${API_BASE_URL}/time`, { cache: 'no-store' }).then(r => r.json());
+    const res = await fetch(`${API_BASE_URL}/time`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
     const t1 = performance.now();
-    if (!data || !data.serverMs) return;
+    if (!data || !data.serverMs) throw new Error('bad payload');
     phClock.baseMs = data.serverMs + (t1 - t0) / 2;
     phClock.basePerf = t1;
-  } catch (e) { /* keep last known time */ }
+    return true;
+  } catch (e) {
+    console.warn('Time sync failed, will retry:', e.message);
+    return false;
+  }
+}
+
+// Retries every 10 seconds until it works (Render may be waking up), then every 5 minutes
+async function keepPhTimeSynced() {
+  const ok = await syncPhTime();
+  tickClock();
+  setTimeout(keepPhTimeSynced, ok ? 5 * 60 * 1000 : 10 * 1000);
 }
 
 const _phFmt = new Intl.DateTimeFormat('en-US', {
@@ -1045,8 +1058,7 @@ function tickClock() {
 tickClock();
 tickSidebarQuickClock();
 setInterval(() => { tickClock(); tickSidebarQuickClock(); }, 1000);
-syncPhTime().then(tickClock);
-setInterval(syncPhTime, 5 * 60 * 1000);
+keepPhTimeSynced();
 
     window.handlePhotoUpload = function(input, key) {
       const file = input.files && input.files[0];
