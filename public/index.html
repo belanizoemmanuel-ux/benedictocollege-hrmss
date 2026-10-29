@@ -3959,7 +3959,7 @@ window.sidebarQuickAttendance = async function(kind) {
     window.confirmResign = function(id) {
       const e = employees.find(x => x.id === id);
       if (!e) return;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayStr();w
       openModal(`
             <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
             <div style="text-align:center;padding:10px 0;">
@@ -4854,13 +4854,40 @@ function announcementsReportBodyHTML() {
       }
     };
 
+    // Employees sorted by ID (BC-2023-001, 002, 003 ...)
+// ✔ is shown only if the employee has an evaluation dated TODAY.
+// Tomorrow the date no longer matches, so the check disappears automatically.
+function isEvaluatedToday(empId) {
+  const t = todayStr();
+  return reports.some(r => r.employeeId === empId && r.evaluationDate === t);
+}
+
+function reportEmpOptionsHTML(filter = '') {
+  const q = filter.trim().toLowerCase();
+  return [...employees]
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))
+    .filter(e => !q || `${e.first} ${e.last} ${e.id}`.toLowerCase().includes(q))
+    .map(e => `<option value="${e.id}">${isEvaluatedToday(e.id) ? '✔ ' : ''}${e.id} — ${e.first} ${e.last}</option>`)
+    .join('');
+}
+
+window.filterReportEmployees = function(val) {
+  const sel = document.getElementById('rep_emp_new');
+  if (!sel) return;
+  sel.innerHTML = reportEmpOptionsHTML(val);
+  autoFillReportFromAttendance(true);   // reload attendance for the first match
+};
+
     window.showNewReportModal = function() {
       const today = new Date().toISOString().slice(0, 10);
       lastAttendanceStats = null;
       openModal(`
         <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
         <h2 style="margin-top:0;">New Performance Report</h2>
-        <div class="field"><label>Employee</label><select id="rep_emp_new" onchange="autoFillReportFromAttendance(true)">${employees.map(e => `<option value="${e.id}">${e.first} ${e.last} (${e.id})</option>`).join('')}</select></div>
+        <div class="field"><label>Employee</label>
+  <input id="rep_emp_search" type="text" placeholder="Search name or ID…" autocomplete="off" oninput="filterReportEmployees(this.value)" style="margin-bottom:8px;" />
+  <select id="rep_emp_new" onchange="autoFillReportFromAttendance(true)">${reportEmpOptionsHTML()}</select>
+</div>
         <button class="btn btn-outline" style="width:100%;margin-bottom:14px;" onclick="autoFillReportFromAttendance()"><i class="fas fa-magic"></i> Regenerate from Attendance</button>
         <div id="attendancePreview" style="display:none;margin-bottom:14px;">
           <div style="font-size:11px;font-weight:700;color:var(--navy-light);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Attendance Summary</div>
