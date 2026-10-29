@@ -463,7 +463,6 @@ async function seed() {
     console.error('Seed error:', error);
   }
 }
-seed();
 
 // One-time cleanup: anyone still marked Inactive in Employees moves to Separated
 async function cleanupInactiveEmployees() {
@@ -496,8 +495,12 @@ function emailMatch(email) {
 // Next employee ID: 1, 2, 3... (looks at active AND separated so IDs are never reused)
 async function nextEmployeeId() {
   const [a, b] = await Promise.all([Employee.find({}, { id: 1 }), Separated.find({}, { id: 1 })]);
-  const nums = [...a, ...b].map(x => String(x.id || '')).filter(s => /^\d+$/.test(s)).map(Number);
-  return String((nums.length ? Math.max(...nums) : 0) + 1);
+  const nums = [...a, ...b]
+    .map(x => String(x.id || '').match(/^BC-2023-(\d+)$/))
+    .filter(Boolean)
+    .map(m => Number(m[1]));
+  const next = (nums.length ? Math.max(...nums) : 0) + 1;
+  return 'BC-2023-' + String(next).padStart(3, '0');
 }
 
 // ─── Auth Routes ───
@@ -574,25 +577,6 @@ app.get('/api/employees/by-email/:email', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch employee' });
   }
-});
-
-app.post('/api/admin/renumber-employee-ids', async (req, res) => {
-  try {
-    const all = [...await Employee.find(), ...await Separated.find()];
-    const isNum = s => /^\d+$/.test(String(s));
-    let next = Math.max(0, ...all.filter(x => isNum(x.id)).map(x => Number(x.id))) + 1;
-    const todo = all.filter(x => !isNum(x.id))
-      .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
-    const map = {};
-    for (const x of todo) map[x.id] = String(next++);
-    for (const [oldId, newId] of Object.entries(map)) {
-      await Employee.updateMany({ id: oldId }, { id: newId });
-      await Separated.updateMany({ id: oldId }, { id: newId });
-      await AttendanceLog.updateMany({ employeeId: oldId }, { employeeId: newId });
-      await Report.updateMany({ employeeId: oldId }, { employeeId: newId });
-    }
-    res.json({ success: true, map });
-  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/employees', async (req, res) => {
@@ -1519,23 +1503,19 @@ app.delete('/api/reports/:id', async (req, res) => {
   }
 });
 
-// TEMPORARY: renumber old IDs (BC-2023-001 -> 1 ...). Delete after running once.
-app.post('/api/admin/renumber-employee-ids', async (req, res) => {
+// TEMPORARY: removes duplicate employee rows (keeps the oldest). Delete after running once.
+app.post('/api/admin/remove-duplicate-employees', async (req, res) => {
   try {
-    const all = [...await Employee.find(), ...await Separated.find()];
-    const isNum = s => /^\d+$/.test(String(s));
-    let next = Math.max(0, ...all.filter(x => isNum(x.id)).map(x => Number(x.id))) + 1;
-    const todo = all.filter(x => !isNum(x.id))
-      .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
-    const map = {};
-    for (const x of todo) map[x.id] = String(next++);
-    for (const [oldId, newId] of Object.entries(map)) {
-      await Employee.updateMany({ id: oldId }, { id: newId });
-      await Separated.updateMany({ id: oldId }, { id: newId });
-      await AttendanceLog.updateMany({ employeeId: oldId }, { employeeId: newId });
-      await Report.updateMany({ employeeId: oldId }, { employeeId: newId });
+    let removed = 0;
+    for (const Model of [Employee, Separated]) {
+      const seen = new Set();
+      const docs = await Model.find().sort({ _id: 1 });
+      for (const d of docs) {
+        if (seen.has(d.id)) { await Model.deleteOne({ _id: d._id }); removed++; }
+        else seen.add(d.id);
+      }
     }
-    res.json({ success: true, map });
+    res.json({ success: true, removed });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

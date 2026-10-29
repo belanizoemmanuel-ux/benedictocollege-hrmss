@@ -1147,12 +1147,6 @@ function hideSplash() {
   if (lt) lt.classList.remove('show');
 }
 
-async function nextEmployeeId() {
-  const [a, b] = await Promise.all([Employee.find({}, { id: 1 }), Separated.find({}, { id: 1 })]);
-  const nums = [...a, ...b].map(x => String(x.id || '')).filter(s => /^\d+$/.test(s)).map(Number);
-  return String((nums.length ? Math.max(...nums) : 0) + 1);
-}
-
 async function handleLogin(email, password) {
   const errEl = document.getElementById('authError');
   errEl.classList.remove('show');
@@ -1773,17 +1767,17 @@ window.sidebarQuickAttendance = async function(kind) {
     // Force a SPECIFIC employee (by ID) into a specific box, optionally
     // with a custom displayed role label (their actual stored position
     // is untouched — this only affects how it's shown on the box view).
-    const EMPLOYEE_BOX_OVERRIDE = {
-  '6':  { box: 'Information Technology Department', roleLabel: 'IT Advisor' },
-  '4':  { box: 'Accountancy Department' },
-  '5':  { box: 'Business Department' },
-  '8':  { box: null },
-  '3':  { box: 'Educational Department' },
-  '7':  { box: 'Educational Department' },
-  '10': { box: 'Educational Department' },
-  '1':  { box: 'Educational Department' },
-  '2':  { box: 'Educational Department' },
-  '9':  { box: 'Educational Department' }
+  const EMPLOYEE_BOX_OVERRIDE = {
+  'BC-2023-006': { box: 'Information Technology Department', roleLabel: 'IT Advisor' },
+  'BC-2023-004': { box: 'Accountancy Department' },
+  'BC-2023-005': { box: 'Business Department' },
+  'BC-2023-008': { box: null },
+  'BC-2023-003': { box: 'Educational Department' },
+  'BC-2023-007': { box: 'Educational Department' },
+  'BC-2023-010': { box: 'Educational Department' },
+  'BC-2023-001': { box: 'Educational Department' },
+  'BC-2023-002': { box: 'Educational Department' },
+  'BC-2023-009': { box: 'Educational Department' }
 };
 
     // Fallback department-name matching, used only when no override above.
@@ -4489,7 +4483,7 @@ function employeeAttendancePage() {
     }
 
     function masterlistBodyHTML() {
-      const list = [...employees].sort((a, b) => (a.first + a.last).localeCompare(b.first + b.last));
+      const list = [...employees].sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
       return `
         <table>
           <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Position</th><th>Type</th><th>Date Hired</th><th>Status</th></tr></thead>
@@ -4527,7 +4521,8 @@ function employeeAttendancePage() {
 }
 
 function attendanceReportBodyHTML() {
-  const rows = todayAttendanceStatus.length ? todayAttendanceStatus : attendanceLogs;
+  const rows = (todayAttendanceStatus.length ? todayAttendanceStatus : attendanceLogs)
+  .slice().sort((a, b) => String(a.employeeId).localeCompare(String(b.employeeId), undefined, { numeric: true }));
   const count = s => rows.filter(r => r.status === s).length;
   const cls = s => s==='Present' ? 'pill-active'
     : s==='Late' ? 'pill-leave'
@@ -4542,6 +4537,7 @@ function attendanceReportBodyHTML() {
       <div class="as-item"><div class="as-num">${count('Undertime')}</div><div class="as-lbl">Undertime</div></div>
       <div class="as-item"><div class="as-num">${count('Absent')}</div><div class="as-lbl">Absent</div></div>
       <div class="as-item"><div class="as-num">${count('On Leave')}</div><div class="as-lbl">On Leave</div></div>
+      <div class="as-item"><div class="as-num">${count('Not Yet Timed In')}</div><div class="as-lbl">Not Yet In</div></div>
     </div>
     <table>
       <thead><tr><th>Employee</th><th>Department</th><th>Time In</th><th>Time Out</th><th>Status</th></tr></thead>
