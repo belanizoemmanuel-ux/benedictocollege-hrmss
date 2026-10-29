@@ -29,6 +29,13 @@
        palette, logo centered at the top of the brand
        panel, feature list, and a clean white login card.
        ═══════════════════════════════════════════════ */
+
+       #loginTransition .lt-badge,
+       #loginTransition .lt-badge img,
+       #loginTransition .lt-text { animation: none; }
+       #loginTransition.show .lt-badge { animation: loginLogoBlast 0.9s cubic-bezier(0.19,1,0.22,1) forwards; }
+       #loginTransition.show .lt-badge img { animation: loginLogoBlurIn 0.9s ease forwards; }
+       #loginTransition.show .lt-text { animation: loginTextIn 0.5s ease 0.35s forwards; }
     .auth-page {
       min-height: 100vh; display: flex; background: var(--bg);
     }
@@ -1023,7 +1030,7 @@ function tickClock() {
 }
 tickClock();
 tickSidebarQuickClock();
-setInterval(tickClock, 1000);
+setInterval(() => { tickClock(); tickSidebarQuickClock(); }, 1000);
 syncPhTime().then(tickClock);
 setInterval(syncPhTime, 5 * 60 * 1000);
 
@@ -1115,25 +1122,86 @@ setInterval(syncPhTime, 5 * 60 * 1000);
     errEl.classList.add('show');
   }
 }
-    function playLoginTransition() {
-      return new Promise(resolve => {
-        const lt = document.getElementById('loginTransition');
-        if (!lt) { resolve(); return; }
-        lt.classList.add('show');
-        setTimeout(() => { lt.classList.remove('show'); resolve(); }, 900);
-      });
-    }
+    function showSplash(text) {
+  const lt = document.getElementById('loginTransition');
+  if (!lt) return;
+  lt.querySelector('.lt-text').textContent = text || 'Signing you in…';
+  lt.classList.add('show');
+}
+function hideSplash() {
+  const lt = document.getElementById('loginTransition');
+  if (lt) lt.classList.remove('show');
+}
 
-    function handleLogout() {
-      currentUser = null;
-      localStorage.removeItem('bc_token');
-      localStorage.removeItem('bc_user');
-      appContainer.classList.remove('show');
-      appContainer.style.display = 'none';
-      authContainer.style.display = 'block';
-      renderAuthPage();
-      showToast('Logged out');
+async function handleLogin(email, password) {
+  const errEl = document.getElementById('authError');
+  errEl.classList.remove('show');
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Invalid email or password.';
+      errEl.classList.add('show');
+      return;
     }
+    localStorage.setItem('bc_token', data.token);
+    localStorage.setItem('bc_user', JSON.stringify(data.user));
+    currentUser = data.user;
+
+    showSplash();   // stays up until the portal is loaded AND drawn
+    await Promise.all([initApp(), new Promise(r => setTimeout(r, 900))]);
+    hideSplash();
+  } catch (err) {
+    hideSplash();
+    errEl.textContent = 'Unable to connect to the HR server. Please check your internet connection and try again.';
+    errEl.classList.add('show');
+  }
+}
+
+   function resetSessionState() {
+  employees = []; departments = []; leaveRequests = []; announcements = [];
+  complaints = []; activities = []; attendanceLogs = []; todayAttendanceStatus = [];
+  separated = []; reports = []; lastAttendanceStats = null;
+
+  currentPage = 'dashboard';
+  leaveStatusFilter = 'all'; attendanceStatusFilter = 'all'; complaintFilter = 'pending';
+  selectedReportType = null; selectedLeaveRequestId = null; announcementMonthFilter = null;
+  attendanceArchiveMonth = null; attendanceArchiveLogs = []; attendanceArchiveBuckets = [];
+  myAttendanceMonth = null; myAttendanceBuckets = []; myAttendanceLogs = [];
+  selectedEmployeeBox = null; selectedDeptCard = null;
+
+  if (attendanceChart) { attendanceChart.destroy(); attendanceChart = null; }
+
+  pageEl.innerHTML = '';
+  sidebarNav.innerHTML = '';
+  notifList.innerHTML = '';
+  $('userName').textContent = '';
+  $('userRole').textContent = '';
+  $('topbarAvatar').innerHTML = '<i class="fas fa-user"></i>';
+  globalSearch.value = '';
+  const sr = document.getElementById('globalSearchResults');
+  if (sr) { sr.classList.remove('show'); sr.innerHTML = ''; }
+  notifPanel.classList.remove('show');
+  document.getElementById('sidebar').classList.remove('open');
+  closeUserDropdown();
+  closeModal();
+}
+
+function handleLogout() {
+  currentUser = null;
+  localStorage.removeItem('bc_token');
+  localStorage.removeItem('bc_user');
+  resetSessionState();                       // ← new
+  appContainer.classList.remove('show');
+  appContainer.style.display = 'none';
+  authContainer.style.display = 'block';
+  renderAuthPage();
+  showToast('Logged out');
+}
 
     let authClockTimer = null;
 
@@ -1279,44 +1347,45 @@ window.sidebarQuickAttendance = async function(kind) {
       handleLogin(email, password);
     };
 
-    async function initApp() {
-      const storedUser = localStorage.getItem('bc_user');
-      const token = localStorage.getItem('bc_token');
-      if (storedUser && token) {
-        try { currentUser = JSON.parse(storedUser); } catch (e) { currentUser = null; }
-      }
-      if (!currentUser) {
-        renderAuthPage();
-        return;
-      }
+  async function initApp() {
+  const storedUser = localStorage.getItem('bc_user');
+  const token = localStorage.getItem('bc_token');
+  if (storedUser && token) {
+    try { currentUser = JSON.parse(storedUser); } catch (e) { currentUser = null; }
+  }
+  if (!currentUser) { renderAuthPage(); return; }
 
-      clearInterval(authClockTimer);
-      authContainer.style.display = 'none';
-      appContainer.style.display = 'flex';
-      appContainer.classList.add('show');
+  clearInterval(authClockTimer);
+  const isAdmin = currentUser.role === 'admin';
 
-      $('userName').textContent = currentUser.name;
-      $('userRole').textContent = currentUser.role === 'admin' ? 'HR Manager' : 'Employee';
-      $('portalLabel').textContent = currentUser.role === 'admin' ? 'ADMIN PORTAL' : 'EMPLOYEE PORTAL';
-      document.getElementById('sidebarQuickAttendance').style.display = currentUser.role === 'employee' ? 'block' : 'none';
-      document.getElementById('app').className = currentUser.role === 'admin' ? 'role-admin' : 'role-employee';
+  $('userName').textContent = currentUser.name;
+  $('userRole').textContent = isAdmin ? 'HR Manager' : 'Employee';
+  $('portalLabel').textContent = isAdmin ? 'ADMIN PORTAL' : 'EMPLOYEE PORTAL';
+  document.getElementById('sidebarQuickAttendance').style.display = isAdmin ? 'none' : 'block';
+  document.getElementById('sidebarDayCard').style.display = isAdmin ? 'flex' : 'none';
+  appContainer.className = isAdmin ? 'role-admin' : 'role-employee';
 
-      await loadData();
-      if (!currentUser) return;
-      renderSidebar();
-      refreshSidebarQuick();
-      renderPage();
-      renderNotifications();
-      refreshTopbarAvatar();
+  await loadData();                 // portal is still hidden while this runs
+  if (!currentUser) return;
 
-      globalSearch.oninput = function() {
-        if (currentUser.role === 'admin') {
-          renderGlobalSearchResults(this.value);
-        } else if (currentPage === 'employees') {
-          filterEmployees(this.value);
-        }
-      };
-    }
+  renderSidebar();
+  refreshSidebarQuick();
+  renderPage();
+  renderNotifications();
+  refreshTopbarAvatar();
+  tickClock();
+  tickSidebarQuickClock();
+
+  // reveal only now
+  authContainer.style.display = 'none';
+  appContainer.style.display = 'flex';
+  appContainer.classList.add('show');
+
+  globalSearch.oninput = function() {
+    if (currentUser.role === 'admin') renderGlobalSearchResults(this.value);
+    else if (currentPage === 'employees') filterEmployees(this.value);
+  };
+}
 
     // ─── Global search: looks across every part of the HR admin page
     // (employees, departments, leave, complaints, announcements,
@@ -5062,17 +5131,19 @@ window.deleteDepartment = async function(name) {
 // ═══════════ END DEPARTMENT ACTIONS ═══════════
 
     (async function boot() {
-      const storedUser = localStorage.getItem('bc_user');
-      const token = localStorage.getItem('bc_token');
-      if (storedUser && token) {
-        try {
-          currentUser = JSON.parse(storedUser);
-          await initApp();
-          return;
-        } catch (e) {}
-      }
-      renderAuthPage();
-    })();
+  const storedUser = localStorage.getItem('bc_user');
+  const token = localStorage.getItem('bc_token');
+  if (storedUser && token) {
+    try {
+      currentUser = JSON.parse(storedUser);
+      showSplash('Loading your portal…');
+      await initApp();
+      hideSplash();
+      return;
+    } catch (e) { hideSplash(); }
+  }
+  renderAuthPage();
+})();
 
   </script>
 </body>
