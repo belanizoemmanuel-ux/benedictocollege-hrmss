@@ -29,13 +29,10 @@
        palette, logo centered at the top of the brand
        panel, feature list, and a clean white login card.
        ═══════════════════════════════════════════════ */
+            #loginTransition .lt-badge,
+            #loginTransition .lt-badge img,
+            #loginTransition .lt-text { animation: none; }
 
-       #loginTransition .lt-badge,
-       #loginTransition .lt-badge img,
-       #loginTransition .lt-text { animation: none; }
-       #loginTransition.show .lt-badge { animation: loginLogoBlast 0.9s cubic-bezier(0.19,1,0.22,1) forwards; }
-       #loginTransition.show .lt-badge img { animation: loginLogoBlurIn 0.9s ease forwards; }
-       #loginTransition.show .lt-text { animation: loginTextIn 0.5s ease 0.35s forwards; }
     .auth-page {
       min-height: 100vh; display: flex; background: var(--bg);
     }
@@ -212,7 +209,7 @@
     }
     
     #page.page-anim { animation: pageFadeSlideIn 0.32s cubic-bezier(0.16,1,0.3,1); }
-
+  
     #app { display: flex; min-height: 100vh; display: none; }
     #app.show { display: flex; }
 
@@ -757,6 +754,7 @@
 .college-mini-card.dept-inactive { opacity: 0.6; filter: grayscale(0.4); }
 .cmc-inactive-badge { display: inline-block; background: #fde7e6; color: #b3271f; font-size: 9.5px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; padding: 2px 8px; border-radius: 20px; margin-right: 6px; }
 .btn-amber { background: var(--amber); color: #fff; }
+.day-card .time { white-space: nowrap; font-size: 15px; }
 .box-roster-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
   </style>
@@ -776,24 +774,40 @@
         </div>
       </div>
       <nav class="sidenav" id="sidenav"></nav>
-      <div class="sidebar-foot">
-  <div class="sb-quick" id="sidebarQuickAttendance" style="display:none;">
-  <div class="sb-clock-row">
-    <span class="sb-clock" id="sbClock">--:--:--</span>
-    <span class="sb-ampm" id="sbAmpm">--</span>
-  </div>
-  <div class="sb-date" id="sbDate">-</div>
-  <div class="sb-quick-label">Quick Time In / Time Out</div>
-  <div class="sb-quick-btns">
-    <button type="button" class="sb-quick-btn in" id="sbInBtn" onclick="sidebarQuickAttendance('in')">
-      <i class="fas fa-right-to-bracket"></i> Time In
-    </button>
-    <button type="button" class="sb-quick-btn out" id="sbOutBtn" onclick="sidebarQuickAttendance('out')">
-      <i class="fas fa-right-from-bracket"></i> Time Out
-    </button>
-  </div>
-  <div class="sb-quick-status" id="sbQuickStatus">Tap Time In to start your day.</div>
-</div>
+            <div class="sidebar-foot">
+        <!-- Date and live clock (admin portal) -->
+        <div class="day-card" id="sidebarDayCard">
+          <div class="ic"><i class="fas fa-calendar-day"></i></div>
+          <div>
+            <div class="date" style="opacity:.7">Today is</div>
+            <div class="day" id="curDay">-</div>
+            <div class="date" id="curDate">-</div>
+          </div>
+          <div style="margin-left:auto;text-align:right;">
+            <div class="time" id="curTime">-</div>
+            <div class="ampm" id="curAmpm">-</div>
+          </div>
+        </div>
+
+        <!-- Quick Time In / Time Out (employee portal) -->
+        <div class="sb-quick" id="sidebarQuickAttendance" style="display:none;">
+          <div class="sb-clock-row">
+            <span class="sb-clock" id="sbClock">--:--:--</span>
+            <span class="sb-ampm" id="sbAmpm">--</span>
+          </div>
+          <div class="sb-date" id="sbDate">-</div>
+          <div class="sb-quick-label">Quick Time In / Time Out</div>
+          <div class="sb-quick-btns">
+            <button type="button" class="sb-quick-btn in" id="sbInBtn" onclick="sidebarQuickAttendance('in')">
+              <i class="fas fa-right-to-bracket"></i> Time In
+            </button>
+            <button type="button" class="sb-quick-btn out" id="sbOutBtn" onclick="sidebarQuickAttendance('out')">
+              <i class="fas fa-right-from-bracket"></i> Time Out
+            </button>
+          </div>
+          <div class="sb-quick-status" id="sbQuickStatus">Tap Time In to start your day.</div>
+        </div>
+      </div>
     </aside>
 
     <div id="main">
@@ -1020,13 +1034,13 @@ function tickSidebarQuickClock() {
 
 function tickClock() {
   const p = phParts();
+  const s = {};
+  _phSecFmt.formatToParts(new Date(phNowMs())).forEach(x => { s[x.type] = x.value; });
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   const dateText = `${p.month} ${p.day}, ${p.year}`;
-  const timeText = `${p.hour}:${p.minute}`;
-  // sidebar (portal)
-  set('curDay', p.weekday); set('curDate', dateText); set('curTime', timeText); set('curAmpm', p.dayPeriod);
-  // login page
-  set('authDay', p.weekday); set('authDate', dateText); set('authTime', timeText); set('authAmpm', p.dayPeriod);
+  const timeText = `${s.hour}:${s.minute}:${s.second}`;
+  set('curDay', p.weekday); set('curDate', dateText); set('curTime', timeText); set('curAmpm', s.dayPeriod);
+  set('authDay', p.weekday); set('authDate', dateText); set('authTime', timeText); set('authAmpm', s.dayPeriod);
 }
 tickClock();
 tickSidebarQuickClock();
@@ -1122,7 +1136,7 @@ setInterval(syncPhTime, 5 * 60 * 1000);
     errEl.classList.add('show');
   }
 }
-    function showSplash(text) {
+  function showSplash(text) {
   const lt = document.getElementById('loginTransition');
   if (!lt) return;
   lt.querySelector('.lt-text').textContent = text || 'Signing you in…';
@@ -1162,46 +1176,16 @@ async function handleLogin(email, password) {
   }
 }
 
-   function resetSessionState() {
-  employees = []; departments = []; leaveRequests = []; announcements = [];
-  complaints = []; activities = []; attendanceLogs = []; todayAttendanceStatus = [];
-  separated = []; reports = []; lastAttendanceStats = null;
-
-  currentPage = 'dashboard';
-  leaveStatusFilter = 'all'; attendanceStatusFilter = 'all'; complaintFilter = 'pending';
-  selectedReportType = null; selectedLeaveRequestId = null; announcementMonthFilter = null;
-  attendanceArchiveMonth = null; attendanceArchiveLogs = []; attendanceArchiveBuckets = [];
-  myAttendanceMonth = null; myAttendanceBuckets = []; myAttendanceLogs = [];
-  selectedEmployeeBox = null; selectedDeptCard = null;
-
-  if (attendanceChart) { attendanceChart.destroy(); attendanceChart = null; }
-
-  pageEl.innerHTML = '';
-  sidebarNav.innerHTML = '';
-  notifList.innerHTML = '';
-  $('userName').textContent = '';
-  $('userRole').textContent = '';
-  $('topbarAvatar').innerHTML = '<i class="fas fa-user"></i>';
-  globalSearch.value = '';
-  const sr = document.getElementById('globalSearchResults');
-  if (sr) { sr.classList.remove('show'); sr.innerHTML = ''; }
-  notifPanel.classList.remove('show');
-  document.getElementById('sidebar').classList.remove('open');
-  closeUserDropdown();
-  closeModal();
-}
-
-function handleLogout() {
-  currentUser = null;
-  localStorage.removeItem('bc_token');
-  localStorage.removeItem('bc_user');
-  resetSessionState();                       // ← new
-  appContainer.classList.remove('show');
-  appContainer.style.display = 'none';
-  authContainer.style.display = 'block';
-  renderAuthPage();
-  showToast('Logged out');
-}
+    function handleLogout() {
+      currentUser = null;
+      localStorage.removeItem('bc_token');
+      localStorage.removeItem('bc_user');
+      appContainer.classList.remove('show');
+      appContainer.style.display = 'none';
+      authContainer.style.display = 'block';
+      renderAuthPage();
+      showToast('Logged out');
+    }
 
     let authClockTimer = null;
 
@@ -1300,7 +1284,7 @@ window.sidebarQuickAttendance = async function(kind) {
       <div class="auth-form-panel">
         <div class="auth-card">
           <div class="auth-lock-badge"><i class="fas fa-lock"></i></div>
-          <h2>Login Page!</h2>
+          <h2>Login Page</h2>
           <p class="sub">Please login to your account</p>
           <div class="error-msg" id="authError"></div>
           <form id="authForm" onsubmit="handleAuthSubmit(event)">
@@ -1347,7 +1331,7 @@ window.sidebarQuickAttendance = async function(kind) {
       handleLogin(email, password);
     };
 
-  async function initApp() {
+    async function initApp() {
   const storedUser = localStorage.getItem('bc_user');
   const token = localStorage.getItem('bc_token');
   if (storedUser && token) {
@@ -1783,18 +1767,18 @@ window.sidebarQuickAttendance = async function(kind) {
     // Force a SPECIFIC employee (by ID) into a specific box, optionally
     // with a custom displayed role label (their actual stored position
     // is untouched — this only affects how it's shown on the box view).
-    const EMPLOYEE_BOX_OVERRIDE = {
-      'BC-2023-006': { box: 'Information Technology Department', roleLabel: 'IT Advisor' }, // Anton Bautista
-      'BC-2023-004': { box: 'Accountancy Department' },   // Jose Villanueva
-      'BC-2023-005': { box: 'Business Department' },      // Wilma Mondragon
-      'BC-2023-008': { box: null },   // Ricardo Fernandez — not shown yet; Engineering has no confirmed staff
-      'BC-2023-003': { box: 'Educational Department' },   // Maria Cruz
-      'BC-2023-007': { box: 'Educational Department' },   // Lorna Del Rosario
-      'BC-2023-010': { box: 'Educational Department' },   // Mark Tan
-      'BC-2023-001': { box: 'Educational Department' },   // Emma Santos
-      'BC-2023-002': { box: 'Educational Department' },   // Carlos Reyes
-      'BC-2023-009': { box: 'Educational Department' }    // Sarah Lim
-    };
+  const EMPLOYEE_BOX_OVERRIDE = {
+  'BC-2023-006': { box: 'Information Technology Department', roleLabel: 'IT Advisor' },
+  'BC-2023-004': { box: 'Accountancy Department' },
+  'BC-2023-005': { box: 'Business Department' },
+  'BC-2023-008': { box: null },
+  'BC-2023-003': { box: 'Educational Department' },
+  'BC-2023-007': { box: 'Educational Department' },
+  'BC-2023-010': { box: 'Educational Department' },
+  'BC-2023-001': { box: 'Educational Department' },
+  'BC-2023-002': { box: 'Educational Department' },
+  'BC-2023-009': { box: 'Educational Department' }
+};
 
     // Fallback department-name matching, used only when no override above.
     const DEPT_TO_BOX = {
@@ -1950,7 +1934,7 @@ window.sidebarQuickAttendance = async function(kind) {
       const list = (q ? employees.filter(e => {
         const s = (e.first + ' ' + e.last + ' ' + e.id + ' ' + e.department + ' ' + e.position).toLowerCase();
         return s.includes(q.toLowerCase());
-      }) : employees).slice().sort((a, b) => (a.first + a.last).localeCompare(b.first + b.last));
+      }) : employees).slice().sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
       return `
             <div class="page-header-flex">
               <div>
@@ -3269,7 +3253,7 @@ window.sidebarQuickAttendance = async function(kind) {
                   <div class="field"><label>First Name</label><input id="f_first" type="text" /></div>
                   <div class="field"><label>Middle Name</label><input id="f_middle" type="text" /></div>
                   <div class="field"><label>Last Name</label><input id="f_last" type="text" /></div>
-                  <div class="field"><label>Employee ID</label><input id="f_id" type="text" placeholder="BC-2028-0##" /></div>
+                  <div class="field"><label>Employee ID</label><input id="f_id" type="text" value="Auto-generated" disabled style="background:#eef0f8;color:var(--sub);" /></div>
                   <div class="field"><label>Date of Birth</label><input id="f_dob" type="date" /></div>
                   <div class="field"><label>Gender</label>
                     <select id="f_gender"><option>Female</option><option>Male</option><option>Prefer not to say</option></select>
@@ -3351,10 +3335,9 @@ window.sidebarQuickAttendance = async function(kind) {
         showToast('Email is required — it is the employee\'s login username', 'fa-triangle-exclamation');
         return;
       }
-      const id = document.getElementById('f_id').value.trim() || ('BC-2028-' + String(employees.length + 1).padStart(3, '0'));
       const dept = document.getElementById('f_department').value;
-      const newEmp = {
-        id, first,
+        const newEmp = {
+        first,
         password: portalPassword,
         middle: document.getElementById('f_middle').value.trim(),
         last,
@@ -3396,7 +3379,7 @@ window.sidebarQuickAttendance = async function(kind) {
               <div style="text-align:center;">
                 <div class="success-tick"><i class="fas fa-check"></i></div>
                 <h2 style="margin:0 0 6px;">Employee Added!</h2>
-                <p style="color:var(--sub);margin:0 0 4px;">${first} ${last} has been added to ${dept}.</p>
+                <p style="color:var(--sub);margin:0 0 4px;">${first} ${last} (ID: ${savedEmp.id}) has been added to ${dept}.</p>
                 ${pwdBlock}
                 <button class="btn btn-navy" style="width:100%;" onclick="closeModal(); goTo('employees');">View Employees</button>
               </div>
@@ -4423,26 +4406,32 @@ function employeeAttendancePage() {
   { key: 'performance', label: 'Performance Evaluation Report', icon: 'fa-star', desc: 'Roles, duties, and evaluation scores per employee.' }
   ];
 
-    function reportTypeCardHTML(rt) {
-      const active = selectedReportType === rt.key;
-      return `
-        <div class="report-type-card ${active ? 'active' : ''}" onclick="selectReportType('${rt.key}')">
-          <div class="rtc-icon"><i class="fas ${rt.icon}"></i></div>
-          <div class="rtc-title">${rt.label}</div>
-          <div class="rtc-desc">${rt.desc}</div>
-        </div>`;
-    }
+    function reportTypeCardHTML(rt, num) {
+  const active = selectedReportType === rt.key;
+  return `
+    <div class="report-type-card ${active ? 'active' : ''}" onclick="selectReportType('${rt.key}')">
+      <div class="rtc-icon"><i class="fas ${rt.icon}"></i></div>
+      <div class="rtc-title">${num}. ${rt.label}</div>
+      <div class="rtc-desc">${rt.desc}</div>
+    </div>`;
+}
 
-    window.selectReportType = function(key) {
-      selectedReportType = (selectedReportType === key) ? null : key;
-      renderPage();
-      if (selectedReportType) {
-        requestAnimationFrame(() => {
-          const panel = document.getElementById('reportContentPanel');
-          if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        });
-      }
-    };
+    window.selectReportType = async function(key) {
+  selectedReportType = (selectedReportType === key) ? null : key;
+  if (selectedReportType === 'attendance') {
+    // make sure EVERY employee is included, not only those who already timed in
+    try {
+      todayAttendanceStatus = await fetch(`${API_BASE_URL}/attendance/status-today`).then(r => r.json());
+    } catch (e) {}
+  }
+  renderPage();
+  if (selectedReportType) {
+    requestAnimationFrame(() => {
+      const panel = document.getElementById('reportContentPanel');
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }
+};
 
     function adminReportsPage() {
       return `
@@ -4454,7 +4443,7 @@ function employeeAttendancePage() {
               <button class="btn btn-navy" onclick="showNewReportModal()"><i class="fas fa-plus"></i> New Evaluation</button>
             </div>
             <div class="report-type-grid">
-              ${REPORT_TYPES.map(rt => reportTypeCardHTML(rt)).join('')}
+            ${REPORT_TYPES.map((rt, i) => reportTypeCardHTML(rt, i + 1)).join('')}
             </div>
             ${selectedReportType ? reportContentPanelHTML() : `
               <div class="panel" style="text-align:center;padding:54px 20px;">
@@ -4494,7 +4483,7 @@ function employeeAttendancePage() {
     }
 
     function masterlistBodyHTML() {
-      const list = [...employees].sort((a, b) => (a.first + a.last).localeCompare(b.first + b.last));
+      const list = [...employees].sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
       return `
         <table>
           <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Position</th><th>Type</th><th>Date Hired</th><th>Status</th></tr></thead>
@@ -4531,35 +4520,39 @@ function employeeAttendancePage() {
   }).join('');
 }
 
-        function attendanceReportBodyHTML() {
-  const rows = todayAttendanceStatus.length ? todayAttendanceStatus : attendanceLogs;
-  const present = rows.filter(r => r.status === 'Present').length;
-  const late = rows.filter(r => r.status === 'Late').length;
-  const undertime = rows.filter(r => r.status === 'Undertime').length;
-  const absent = rows.filter(r => r.status === 'Absent').length;
-  const onLeave = rows.filter(r => r.status === 'On Leave').length;
-  const exceptions = rows.filter(r => r.status === 'Late' || r.status === 'Undertime' || r.status === 'Absent');
-  const cls = s => s==='Present' ? 'pill-active' : (s==='Late' ? 'pill-leave' : (s==='Undertime' ? 'pill-undertime' : (s==='Absent' ? 'pill-inactive' : 'pill-leave')));
-  const rowHTML = l => `<tr><td>${l.name}</td><td>${l.department}</td><td>${l.timeIn||'-'}</td><td>${l.timeOut||'-'}</td><td><span class="pill ${cls(l.status)}">${l.status}</span></td></tr>`;
-  const head = `<thead><tr><th>Employee</th><th>Department</th><th>Time In</th><th>Time Out</th><th>Status</th></tr></thead>`;
+function attendanceReportBodyHTML() {
+  const rows = (todayAttendanceStatus.length ? todayAttendanceStatus : attendanceLogs)
+  .slice().sort((a, b) => String(a.employeeId).localeCompare(String(b.employeeId), undefined, { numeric: true }));
+  const count = s => rows.filter(r => r.status === s).length;
+  const cls = s => s==='Present' ? 'pill-active'
+    : s==='Late' ? 'pill-leave'
+    : s==='Undertime' ? 'pill-undertime'
+    : s==='Absent' ? 'pill-inactive'
+    : s==='On Leave' ? 'pill-leave' : 'pill-pending';
   return `
     <div class="attendance-summary-box" style="margin-bottom:16px;">
-      <div class="as-item"><div class="as-num">${present}</div><div class="as-lbl">Present</div></div>
-      <div class="as-item"><div class="as-num">${late}</div><div class="as-lbl">Late</div></div>
-      <div class="as-item"><div class="as-num">${undertime}</div><div class="as-lbl">Undertime</div></div>
-      <div class="as-item"><div class="as-num">${absent}</div><div class="as-lbl">Absent</div></div>
-      <div class="as-item"><div class="as-num">${onLeave}</div><div class="as-lbl">On Leave</div></div>
+      <div class="as-item"><div class="as-num">${rows.length}</div><div class="as-lbl">Total Employees</div></div>
+      <div class="as-item"><div class="as-num">${count('Present')}</div><div class="as-lbl">Present</div></div>
+      <div class="as-item"><div class="as-num">${count('Late')}</div><div class="as-lbl">Late</div></div>
+      <div class="as-item"><div class="as-num">${count('Undertime')}</div><div class="as-lbl">Undertime</div></div>
+      <div class="as-item"><div class="as-num">${count('Absent')}</div><div class="as-lbl">Absent</div></div>
+      <div class="as-item"><div class="as-num">${count('On Leave')}</div><div class="as-lbl">On Leave</div></div>
+      <div class="as-item"><div class="as-num">${count('Not Yet Timed In')}</div><div class="as-lbl">Not Yet In</div></div>
     </div>
-    <table>${head}<tbody>
-      ${rows.length ? rows.map(rowHTML).join('') : `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-fingerprint"></i><p>No attendance data for today.</p></div></td></tr>`}
-    </tbody></table>
-    <div style="margin-top:24px;padding-top:18px;border-top:2px solid #d9dcea;">
-      <strong style="font-size:14px;">Late, Undertime &amp; Absences</strong>
-      <span style="color:#6b7085;font-size:12px;margin-left:8px;">${exceptions.length} record(s) today</span>
-      <table style="margin-top:10px;">${head}<tbody>
-        ${exceptions.length ? exceptions.map(rowHTML).join('') : `<tr><td colspan="5" style="text-align:center;color:#6b7085;padding:18px;">No late, undertime, or absent records for today.</td></tr>`}
-      </tbody></table>
-    </div>
+    <table>
+      <thead><tr><th>Employee</th><th>Department</th><th>Time In</th><th>Time Out</th><th>Status</th></tr></thead>
+      <tbody>
+        ${rows.length ? rows.map(l => `
+          <tr>
+            <td>${l.name}</td>
+            <td>${l.department}</td>
+            <td>${l.timeIn || '-'}</td>
+            <td>${l.timeOut || '-'}</td>
+            <td><span class="pill ${cls(l.status)}">${l.status}</span></td>
+          </tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-fingerprint"></i><p>No attendance data for today.</p></div></td></tr>`}
+      </tbody>
+    </table>
+    <p style="color:var(--sub);font-size:12px;margin-top:12px;">${rows.length} employee(s) in today's attendance summary.</p>
   `;
 }
 
@@ -4972,6 +4965,47 @@ function announcementsReportBodyHTML() {
           `).join('') || '<div style="padding:20px;color:var(--sub);text-align:center;">No notifications</div>';
       updateBellBadge();
     }
+
+    function resetSessionState() {
+  employees = []; departments = []; leaveRequests = []; announcements = [];
+  complaints = []; activities = []; attendanceLogs = []; todayAttendanceStatus = [];
+  separated = []; reports = []; lastAttendanceStats = null;
+
+  currentPage = 'dashboard';
+  leaveStatusFilter = 'all'; attendanceStatusFilter = 'all'; complaintFilter = 'pending';
+  selectedReportType = null; selectedLeaveRequestId = null; announcementMonthFilter = null;
+  attendanceArchiveMonth = null; attendanceArchiveLogs = []; attendanceArchiveBuckets = [];
+  myAttendanceMonth = null; myAttendanceBuckets = []; myAttendanceLogs = [];
+  selectedEmployeeBox = null; selectedDeptCard = null;
+
+  if (attendanceChart) { attendanceChart.destroy(); attendanceChart = null; }
+
+  pageEl.innerHTML = '';
+  sidebarNav.innerHTML = '';
+  notifList.innerHTML = '';
+  $('userName').textContent = '';
+  $('userRole').textContent = '';
+  $('topbarAvatar').innerHTML = '<i class="fas fa-user"></i>';
+  globalSearch.value = '';
+  const sr = document.getElementById('globalSearchResults');
+  if (sr) { sr.classList.remove('show'); sr.innerHTML = ''; }
+  notifPanel.classList.remove('show');
+  document.getElementById('sidebar').classList.remove('open');
+  closeUserDropdown();
+  closeModal();
+}
+
+function handleLogout() {
+  currentUser = null;
+  localStorage.removeItem('bc_token');
+  localStorage.removeItem('bc_user');
+  resetSessionState();                       // ← new
+  appContainer.classList.remove('show');
+  appContainer.style.display = 'none';
+  authContainer.style.display = 'block';
+  renderAuthPage();
+  showToast('Logged out');
+}
 
 // ═══════════ DEPARTMENT: RENAME / INACTIVE / REMOVE ═══════════
 function deptCardHTML(d) {
