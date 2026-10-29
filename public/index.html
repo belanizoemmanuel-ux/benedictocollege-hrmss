@@ -760,33 +760,40 @@
   <div id="authContainer"></div>
 
   <div id="app">
-    <aside id="sidebar">
-      <div class="brand-row">
-        <div class="brand-badge"><img src="/public/logo.png" onerror="if(!this.dataset.t){this.dataset.t=1;this.src='/logo.png'}" alt="Benedicto College Logo" /></div>
-        <div class="brand">
-          <strong>BENEDICTO<br />COLLEGE</strong>
-          <small id="portalLabel">EMPLOYEE PORTAL</small>
+          <div class="sidebar-foot">
+        <!-- Date and live clock (admin portal) -->
+        <div class="day-card" id="sidebarDayCard">
+          <div class="ic"><i class="fas fa-calendar-day"></i></div>
+          <div>
+            <div class="date" style="opacity:.7">Today is</div>
+            <div class="day" id="curDay">-</div>
+            <div class="date" id="curDate">-</div>
+          </div>
+          <div style="margin-left:auto;text-align:right;">
+            <div class="time" id="curTime">-</div>
+            <div class="ampm" id="curAmpm">-</div>
+          </div>
+        </div>
+
+        <!-- Quick Time In / Time Out (employee portal) -->
+        <div class="sb-quick" id="sidebarQuickAttendance" style="display:none;">
+          <div class="sb-clock-row">
+            <span class="sb-clock" id="sbClock">--:--:--</span>
+            <span class="sb-ampm" id="sbAmpm">--</span>
+          </div>
+          <div class="sb-date" id="sbDate">-</div>
+          <div class="sb-quick-label">Quick Time In / Time Out</div>
+          <div class="sb-quick-btns">
+            <button type="button" class="sb-quick-btn in" id="sbInBtn" onclick="sidebarQuickAttendance('in')">
+              <i class="fas fa-right-to-bracket"></i> Time In
+            </button>
+            <button type="button" class="sb-quick-btn out" id="sbOutBtn" onclick="sidebarQuickAttendance('out')">
+              <i class="fas fa-right-from-bracket"></i> Time Out
+            </button>
+          </div>
+          <div class="sb-quick-status" id="sbQuickStatus">Tap Time In to start your day.</div>
         </div>
       </div>
-      <nav class="sidenav" id="sidenav"></nav>
-      <div class="sidebar-foot">
-  <div class="sb-quick" id="sidebarQuickAttendance" style="display:none;">
-  <div class="sb-clock-row">
-    <span class="sb-clock" id="sbClock">--:--:--</span>
-    <span class="sb-ampm" id="sbAmpm">--</span>
-  </div>
-  <div class="sb-date" id="sbDate">-</div>
-  <div class="sb-quick-label">Quick Time In / Time Out</div>
-  <div class="sb-quick-btns">
-    <button type="button" class="sb-quick-btn in" id="sbInBtn" onclick="sidebarQuickAttendance('in')">
-      <i class="fas fa-right-to-bracket"></i> Time In
-    </button>
-    <button type="button" class="sb-quick-btn out" id="sbOutBtn" onclick="sidebarQuickAttendance('out')">
-      <i class="fas fa-right-from-bracket"></i> Time Out
-    </button>
-  </div>
-  <div class="sb-quick-status" id="sbQuickStatus">Tap Time In to start your day.</div>
-</div>
     </aside>
 
     <div id="main">
@@ -1298,7 +1305,8 @@ window.sidebarQuickAttendance = async function(kind) {
       $('userName').textContent = currentUser.name;
       $('userRole').textContent = currentUser.role === 'admin' ? 'HR Manager' : 'Employee';
       $('portalLabel').textContent = currentUser.role === 'admin' ? 'ADMIN PORTAL' : 'EMPLOYEE PORTAL';
-      document.getElementById('sidebarQuickAttendance').style.display = currentUser.role === 'employee' ? 'block' : 'none';
+            document.getElementById('sidebarDayCard').style.display = currentUser.role === 'admin' ? 'flex' : 'none';
+      tickClock();
       document.getElementById('app').className = currentUser.role === 'admin' ? 'role-admin' : 'role-employee';
 
       await loadData();
