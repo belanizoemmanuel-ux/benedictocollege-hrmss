@@ -4422,16 +4422,22 @@ function employeeAttendancePage() {
     </div>`;
 }
 
-    window.selectReportType = function(key) {
-      selectedReportType = (selectedReportType === key) ? null : key;
-      renderPage();
-      if (selectedReportType) {
-        requestAnimationFrame(() => {
-          const panel = document.getElementById('reportContentPanel');
-          if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        });
-      }
-    };
+    window.selectReportType = async function(key) {
+  selectedReportType = (selectedReportType === key) ? null : key;
+  if (selectedReportType === 'attendance') {
+    // make sure EVERY employee is included, not only those who already timed in
+    try {
+      todayAttendanceStatus = await fetch(`${API_BASE_URL}/attendance/status-today`).then(r => r.json());
+    } catch (e) {}
+  }
+  renderPage();
+  if (selectedReportType) {
+    requestAnimationFrame(() => {
+      const panel = document.getElementById('reportContentPanel');
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }
+};
 
     function adminReportsPage() {
       return `
@@ -4523,9 +4529,14 @@ function employeeAttendancePage() {
 function attendanceReportBodyHTML() {
   const rows = todayAttendanceStatus.length ? todayAttendanceStatus : attendanceLogs;
   const count = s => rows.filter(r => r.status === s).length;
-  const cls = s => s==='Present' ? 'pill-active' : (s==='Late' ? 'pill-leave' : (s==='Undertime' ? 'pill-undertime' : (s==='Absent' ? 'pill-inactive' : 'pill-leave')));
+  const cls = s => s==='Present' ? 'pill-active'
+    : s==='Late' ? 'pill-leave'
+    : s==='Undertime' ? 'pill-undertime'
+    : s==='Absent' ? 'pill-inactive'
+    : s==='On Leave' ? 'pill-leave' : 'pill-pending';
   return `
     <div class="attendance-summary-box" style="margin-bottom:16px;">
+      <div class="as-item"><div class="as-num">${rows.length}</div><div class="as-lbl">Total Employees</div></div>
       <div class="as-item"><div class="as-num">${count('Present')}</div><div class="as-lbl">Present</div></div>
       <div class="as-item"><div class="as-num">${count('Late')}</div><div class="as-lbl">Late</div></div>
       <div class="as-item"><div class="as-num">${count('Undertime')}</div><div class="as-lbl">Undertime</div></div>
@@ -4535,9 +4546,17 @@ function attendanceReportBodyHTML() {
     <table>
       <thead><tr><th>Employee</th><th>Department</th><th>Time In</th><th>Time Out</th><th>Status</th></tr></thead>
       <tbody>
-        ${rows.length ? rows.map(l => `<tr><td>${l.name}</td><td>${l.department}</td><td>${l.timeIn||'-'}</td><td>${l.timeOut||'-'}</td><td><span class="pill ${cls(l.status)}">${l.status}</span></td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-fingerprint"></i><p>No attendance data for today.</p></div></td></tr>`}
+        ${rows.length ? rows.map(l => `
+          <tr>
+            <td>${l.name}</td>
+            <td>${l.department}</td>
+            <td>${l.timeIn || '-'}</td>
+            <td>${l.timeOut || '-'}</td>
+            <td><span class="pill ${cls(l.status)}">${l.status}</span></td>
+          </tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-fingerprint"></i><p>No attendance data for today.</p></div></td></tr>`}
       </tbody>
     </table>
+    <p style="color:var(--sub);font-size:12px;margin-top:12px;">${rows.length} employee(s) in today's attendance summary.</p>
   `;
 }
 
