@@ -2190,6 +2190,8 @@ window.sidebarQuickAttendance = async function(kind) {
             </div>
             <div class="field" style="border-top:1px solid var(--line);padding-top:14px;margin-top:14px;">
               <label style="color:var(--navy-light);font-weight:700;">Reset Portal Password (optional)</label>
+              <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="revealEmployeePassword('${e.id}')"><i class="fas fa-eye"></i> Reveal current password</button>
+              <strong id="revealedPw" style="margin-left:10px;font-family:monospace;"></strong>
               <input id="e_password" type="text" placeholder="Leave blank to keep current password" />
               <p style="font-size:11px;color:var(--sub);margin:4px 0 0;">Only fill this in if you want to change ${e.first}'s login password.</p>
             </div>
@@ -2245,6 +2247,15 @@ window.sidebarQuickAttendance = async function(kind) {
   } catch (err) {
     showToast('Failed to update employee', 'fa-triangle-exclamation');
   }
+};
+
+window.revealEmployeePassword = async function(id) {
+  const out = document.getElementById('revealedPw');
+  try {
+    const res = await fetch(`${API_BASE_URL}/employees/${id}/password-reveal`);
+    const data = await res.json();
+    out.textContent = res.ok ? data.password : (data.error || 'Failed');
+  } catch (e) { out.textContent = 'Cannot reach server'; }
 };
 
     const ACADEMIC_COLLEGE_NAMES = ['Tourism Department','Information Technology Department','Accountancy Department','Business Department','Engineering Department','Educational Department'];
