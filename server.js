@@ -17,6 +17,13 @@ function isHashed(str) {
   return /^\$2[aby]\$\d{2}\$/.test(String(str || ''));
 }
 
+// Shows all characters except the last 3, e.g. "Sunny47xK" -> "Sunny4***"
+function makePasswordHint(pw) {
+  const s = String(pw || '');
+  if (s.length <= 3) return '*'.repeat(s.length);
+  return s.slice(0, -3) + '***';
+}
+
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   console.error('❌ JWT_SECRET is missing or too short (use 32+ chars).');
   process.exit(1);
@@ -133,6 +140,7 @@ app.post('/api/auth/change-password', async (req, res) => {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
     user.password = await bcrypt.hash(newPassword, 12);
+    user.passwordHint = makePasswordHint(newPassword);  
     await user.save();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'Failed to change password' }); }
@@ -216,6 +224,7 @@ const User = mongoose.model('User', new mongoose.Schema({
   name: String,
   email: String,
   password: String,
+  passwordHint: String,
   role: {
     type: String,
     enum: ['admin', 'employee']
@@ -519,6 +528,7 @@ app.post('/api/auth/login', async (req, res) => {
       // Old plain-text account: let them in once, then upgrade it to a hash
       ok = true;
       user.password = await bcrypt.hash(password, 12);
+      user.passwordHint = makePasswordHint(password);  
       await user.save();
     }
 
@@ -598,6 +608,7 @@ app.post('/api/employees', async (req, res) => {
   name: `${emp.first} ${emp.last}`,
   email: emp.email,
   password: await bcrypt.hash(generatedPassword, 12),   // ← hashed
+  passwordHint: makePasswordHint(generatedPassword),
   role: 'employee'
 });
       }
@@ -633,6 +644,7 @@ app.put('/api/employees/:id/password', async (req, res) => {
 
     if (user) {
       user.password = hash;
+      user.passwordHint = makePasswordHint(password);  
       user.email = emp.email.trim();      // keep login email in sync with the employee record
       await user.save();
     } else {
@@ -641,6 +653,7 @@ app.put('/api/employees/:id/password', async (req, res) => {
         name: `${emp.first} ${emp.last}`,
         email: emp.email.trim(),
         password: hash,
+        passwordHint: makePasswordHint(password), 
         role: 'employee'
       });
     }
