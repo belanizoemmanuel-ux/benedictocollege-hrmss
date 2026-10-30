@@ -24,6 +24,33 @@ function makePasswordHint(pw) {
   return s.slice(0, -3) + '***';
 }
 
+const crypto = require('crypto');
+
+function getVaultKey() {
+  const k = process.env.PASSWORD_VAULT_KEY || '';
+  return /^[0-9a-f]{64}$/i.test(k) ? Buffer.from(k, 'hex') : null;
+}
+
+function encryptPassword(pw) {
+  const key = getVaultKey();
+  if (!key) return '';
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([c.update(String(pw), 'utf8'), c.final()]);
+  return [iv, c.getAuthTag(), enc].map(b => b.toString('base64')).join('.');
+}
+
+function decryptPassword(stored) {
+  try {
+    const key = getVaultKey();
+    if (!key || !stored) return '';
+    const [iv, tag, enc] = stored.split('.').map(p => Buffer.from(p, 'base64'));
+    const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    d.setAuthTag(tag);
+    return Buffer.concat([d.update(enc), d.final()]).toString('utf8');
+  } catch (e) { return ''; }
+}
+
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   console.error('❌ JWT_SECRET is missing or too short (use 32+ chars).');
   process.exit(1);
@@ -140,7 +167,8 @@ app.post('/api/auth/change-password', async (req, res) => {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
     user.password = await bcrypt.hash(newPassword, 12);
-    user.passwordHint = makePasswordHint(newPassword);  
+    user.passwordHint = makePasswordHint(newPassword);
+    user.passwordEnc = encryptPassword(newPassword);   
     await user.save();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'Failed to change password' }); }
@@ -225,6 +253,7 @@ const User = mongoose.model('User', new mongoose.Schema({
   email: String,
   password: String,
   passwordHint: String,
+  passwordEnc: String,
   role: {
     type: String,
     enum: ['admin', 'employee']
@@ -528,7 +557,8 @@ app.post('/api/auth/login', async (req, res) => {
       // Old plain-text account: let them in once, then upgrade it to a hash
       ok = true;
       user.password = await bcrypt.hash(password, 12);
-      user.passwordHint = makePasswordHint(password);  
+      user.passwordHint = makePasswordHint(password); 
+      user.passwordEnc = encryptPassword(password);   
       await user.save();
     }
 
@@ -609,6 +639,7 @@ app.post('/api/employees', async (req, res) => {
   email: emp.email,
   password: await bcrypt.hash(generatedPassword, 12),   // ← hashed
   passwordHint: makePasswordHint(generatedPassword),
+  passwordEnc: encryptPassword(generatedPassword),
   role: 'employee'
 });
       }
@@ -618,6 +649,23 @@ app.post('/api/employees', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to add employee' });
   }
+});
+
+// Admin only: reveal an employee's stored password
+app.get('/api/employees/:id/password-reveal', async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const emp = await Employee.findOne({ id: req.params.id });
+    if (!emp || !emp.email) return res.status(404).json({ error: 'Employee has no email on file' });
+    const user = await User.findOne({ email: emailMatch(emp.email) });
+    if (!user || !user.passwordEnc) {
+      return res.status(404).json({ error: 'Not stored yet. Reset this password once to enable Reveal.' });
+    }
+    const pw = decryptPassword(user.passwordEnc);
+    if (!pw) return res.status(500).json({ error: 'Could not decrypt (check PASSWORD_VAULT_KEY)' });
+    await Activity.create({ icon: 'fa-eye', text: `Password revealed for ${emp.first} ${emp.last}`, when: 'just now' });
+    res.json({ password: pw });
+  } catch (e) { res.status(500).json({ error: 'Failed to reveal password' }); }
 });
 
 app.put('/api/employees/:id/password', async (req, res) => {
@@ -645,6 +693,7 @@ app.put('/api/employees/:id/password', async (req, res) => {
     if (user) {
       user.password = hash;
       user.passwordHint = makePasswordHint(password);  
+      user.passwordEnc = encryptPassword(password);     
       user.email = emp.email.trim();      // keep login email in sync with the employee record
       await user.save();
     } else {
@@ -654,6 +703,7 @@ app.put('/api/employees/:id/password', async (req, res) => {
         email: emp.email.trim(),
         password: hash,
         passwordHint: makePasswordHint(password), 
+        passwordEnc: encryptPassword(password),
         role: 'employee'
       });
     }
