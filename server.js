@@ -112,6 +112,10 @@ const EMPLOYEE_ROUTES = [
   ['GET',  /^\/attendance\/employee\/[^/]+\/[^/]+$/],
   ['GET',  /^\/reports$/],
   ['POST', /^\/auth\/change-password$/]
+  ['GET',  /^\/biometric-photos$/],
+  ['GET',  /^\/biometric-photos\/months$/],
+  ['GET',  /^\/compliance\/employee\/[^/]+$/],
+  ['POST', /^\/compliance$/],
 ];
 
 app.use('/api', async (req, res, next) => {
@@ -1617,8 +1621,10 @@ const COMPLIANCE_TYPES = ['psa','nbi','sss','philhealth','pagibig','tin','medica
 const isAdmin = req => req.user && req.user.role === 'admin';
 async function ownsEmployee(req, employeeId) {
   if (!req.user || !employeeId) return false;
-  const emp = await Employee.findOne({ id: employeeId });          // your employees model
-  return !!emp && String(emp.email || '').trim().toLowerCase() === String(req.user.email || '').trim().toLowerCase();
+  const account = await User.findById(req.user.id);
+  const emp = await Employee.findOne({ id: employeeId });
+  return !!account && !!emp &&
+    String(emp.email || '').trim().toLowerCase() === String(account.email || '').trim().toLowerCase();
 }
 function bioFilter(req) {
   const q = {};
