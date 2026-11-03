@@ -68,7 +68,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '15mb' }));   // change your existing express.json() line to this
 
 // ── Serve ONLY the public folder (never the whole project) ──
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -1591,6 +1591,108 @@ app.get('/api/test', (req, res) => {
 app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 const PORT = process.env.PORT || 3000;
+
+// ─── Models (MongoDB collections: biometricphotos, compliancedocs) ───
+const BiometricPhoto = mongoose.model('BiometricPhoto', new mongoose.Schema({
+  employeeId:   { type: String, default: 'ALL' },
+  employeeName: String,
+  date:         { type: String, required: true },   // YYYY-MM-DD
+  note:         String,
+  photo:        { type: String, required: true },   // base64 data URL
+  uploadedBy:   String
+}, { timestamps: true }));
+
+const complianceSchema = new mongoose.Schema({
+  employeeId:   { type: String, required: true },
+  employeeName: String,
+  type:         { type: String, required: true },
+  photo:        { type: String, required: true }
+}, { timestamps: true });
+complianceSchema.index({ employeeId: 1, type: 1 }, { unique: true });
+const ComplianceDoc = mongoose.model('ComplianceDoc', complianceSchema);
+
+const COMPLIANCE_TYPES = ['psa','nbi','sss','philhealth','pagibig','tin','medical','diploma','other'];
+
+// ─── Helpers: adjust to match whatever your auth middleware sets on req.user ───
+const isAdmin = req => req.user && req.user.role === 'admin';
+async function ownsEmployee(req, employeeId) {
+  if (!req.user || !employeeId) return false;
+  const emp = await Employee.findOne({ id: employeeId });          // your employees model
+  return !!emp && String(emp.email || '').trim().toLowerCase() === String(req.user.email || '').trim().toLowerCase();
+}
+function bioFilter(req) {
+  const q = {};
+  if (req.query.date)  q.date = req.query.date;
+  if (req.query.month) q.date = { $regex: '^' + req.query.month };
+  if (!isAdmin(req))   q.employeeId = { $in: ['ALL', req.query.employeeId] };
+  return q;
+}
+
+// ─── Biometric photos ───
+app.get('/api/biometric-photos', async (req, res) => {
+  try {
+    if (!isAdmin(req) && !(await ownsEmployee(req, req.query.employeeId))) return res.status(403).json({ error: 'Forbidden' });
+    res.json(await BiometricPhoto.find(bioFilter(req)).sort({ date: -1, createdAt: -1 }).lean());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/biometric-photos/months', async (req, res) => {
+  try {
+    if (!isAdmin(req) && !(await ownsEmployee(req, req.query.employeeId))) return res.status(403).json({ error: 'Forbidden' });
+    const rows = await BiometricPhoto.aggregate([
+      { $match: bioFilter(req) },
+      { $group: { _id: { $substr: ['$date', 0, 7] }, n: { $sum: 1 } } }
+    ]);
+    res.json(Object.fromEntries(rows.map(r => [r._id, r.n])));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/biometric-photos', async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Admins only' });
+    const { employeeId, employeeName, date, note, photo, uploadedBy } = req.body;
+    if (!date || !photo) return res.status(400).json({ error: 'Date and photo are required' });
+    res.status(201).json(await BiometricPhoto.create({ employeeId: employeeId || 'ALL', employeeName, date, note, photo, uploadedBy }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/biometric-photos/:id', async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Admins only' });
+    await BiometricPhoto.findByIdAndDelete(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Compliance documents ───
+app.get('/api/compliance/summary', async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Admins only' });
+    const rows = await ComplianceDoc.aggregate([{ $group: { _id: '$employeeId', types: { $addToSet: '$type' } } }]);
+    res.json(rows.map(r => ({ employeeId: r._id, types: r.types })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/compliance/employee/:id', async (req, res) => {
+  try {
+    if (!isAdmin(req) && !(await ownsEmployee(req, req.params.id))) return res.status(403).json({ error: 'Forbidden' });
+    res.json(await ComplianceDoc.find({ employeeId: req.params.id }).lean());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/compliance', async (req, res) => {
+  try {
+    const { employeeId, employeeName, type, photo } = req.body;
+    if (!employeeId || !photo || !COMPLIANCE_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid document' });
+    if (!isAdmin(req) && !(await ownsEmployee(req, employeeId))) return res.status(403).json({ error: 'Forbidden' });
+    const doc = await ComplianceDoc.findOneAndUpdate(
+      { employeeId, type },
+      { employeeId, employeeName, type, photo },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.status(201).json({ _id: doc._id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.listen(PORT, () => {
   console.log(`✅ HR System running on port ${PORT}`);
