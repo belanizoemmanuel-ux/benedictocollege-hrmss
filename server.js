@@ -111,7 +111,7 @@ const EMPLOYEE_ROUTES = [
   ['POST', /^\/attendance\/time-out$/],
   ['GET',  /^\/attendance\/employee\/[^/]+\/[^/]+$/],
   ['GET',  /^\/reports$/],
-  ['POST', /^\/auth\/change-password$/]
+  ['POST', /^\/auth\/change-password$/],
   ['GET',  /^\/biometric-photos$/],
   ['GET',  /^\/biometric-photos\/months$/],
   ['GET',  /^\/compliance\/employee\/[^/]+$/],
@@ -299,7 +299,16 @@ const Department = mongoose.model('Department', new mongoose.Schema({
 
 const LeaveRequest = mongoose.model('LeaveRequest', new mongoose.Schema({
   id: Number, name: String, email: String, dept: String, type: String, dates: String, reason: String, status: String,
-  daysRequested: { type: Number, default: 1 }
+  daysRequested: { type: Number, default: 1 },
+  // ── fields from the paper form ──
+  employeeNo: String, dateFiled: String,
+  startDate: String, endDate: String, specifiedTime: String,
+  appliedWithPay:     { type: Number, default: 0 },
+  appliedWithoutPay:  { type: Number, default: 0 },
+  approvedWithPay:    { type: Number, default: 0 },
+  approvedWithoutPay: { type: Number, default: 0 },
+  deducted:           { type: Number, default: 0 },   // days taken from the leave balance
+  hrReply: String, decidedBy: String, decidedAt: String
 }));
 
 const Complaint = mongoose.model('Complaint', new mongoose.Schema({
@@ -1091,93 +1100,92 @@ app.get('/api/leave-requests/:id', async (req, res) => {
 });
 
 app.post('/api/leave-requests/submit', async (req, res) => {
-  console.log('📝 Received leave request:', req.body);
   try {
-    const { name, email, dept, type, dates, reason, startDate, endDate } = req.body;
+    const b = req.body || {};
+    const { name, email, dept, type, dates, reason, startDate, endDate, specifiedTime } = b;
+    if (!name || !email || !dept || !type || !dates) return res.status(400).json({ error: 'Missing required fields' });
+    if (!['Vacation Leave', 'Sick Leave', 'Undertime', 'Others'].includes(type)) return res.status(400).json({ error: 'Invalid leave type' });
 
-    if (!name || !email || !dept || !type || !dates) {
-      return res.status(400).json({ 
-        error: 'Missing required fields',
-        details: { name, email, dept, type, dates }
-      });
-    }
-
-    let daysRequested = 1;
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const diffTime = Math.abs(end - start);
-      daysRequested = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    }
-
-    // Case/whitespace-insensitive lookup — this is what was causing
-    // "Employee not found" and silently blocking the submission before.
     const emp = await Employee.findOne({ email: emailMatch(email) });
     if (!emp) return res.status(404).json({ error: 'Employee not found for email: ' + email });
 
-    if (emp.leaveBalance < daysRequested) {
-      return res.status(400).json({ 
-        error: `Insufficient leave balance. You have ${emp.leaveBalance} day(s) left, but requested ${daysRequested} day(s).` 
-      });
+    const isUndertime = type === 'Undertime';
+    const withPay = Math.max(0, Number(b.appliedWithPay) || 0);
+    const withoutPay = Math.max(0, Number(b.appliedWithoutPay) || 0);
+    if (withPay + withoutPay <= 0) return res.status(400).json({ error: 'Enter the number of days/hours applied.' });
+    if (isUndertime && !String(specifiedTime || '').trim()) return res.status(400).json({ error: 'Specified time is required for Undertime.' });
+    if (!isUndertime && withPay > emp.leaveBalance) {
+      return res.status(400).json({ error: `Only ${emp.leaveBalance} day(s) of leave balance left. Put the extra days under "W/OUT PAY".` });
     }
 
-    emp.leaveBalance -= daysRequested;
-    await emp.save();
+    const deducted = isUndertime ? 0 : withPay;
+    if (deducted) { emp.leaveBalance -= deducted; await emp.save(); }
 
-    const lastRequest = await LeaveRequest.findOne().sort({ id: -1 });
-    const newId = lastRequest ? lastRequest.id + 1 : 1;
-
-    const leaveRequest = new LeaveRequest({
-      id: newId,
-      name,
-      email,
-      dept,
-      type,
-      dates,
+    const last = await LeaveRequest.findOne().sort({ id: -1 });
+    const lr = await LeaveRequest.create({
+      id: last ? last.id + 1 : 1,
+      name, email, dept, type, dates,
       reason: reason || 'No reason provided',
       status: 'Pending',
-      daysRequested
+      daysRequested: withPay + withoutPay,
+      employeeNo: emp.id,
+      dateFiled: manilaNow().date,
+      startDate, endDate, specifiedTime: specifiedTime || '',
+      appliedWithPay: withPay, appliedWithoutPay: withoutPay,
+      deducted
     });
 
-    await leaveRequest.save();
-
-    await Activity.create({ 
-      icon: 'fa-file-lines', 
-      text: `${name} submitted a ${type} leave request (${daysRequested} day(s))`, 
-      when: 'just now' 
-    });
-
-    res.status(201).json({ 
-      success: true, 
-      message: 'Leave request submitted successfully',
-      remainingBalance: emp.leaveBalance,
-      data: leaveRequest 
-    });
+    await Activity.create({ icon: 'fa-file-lines', text: `${name} filed ${type} (${withPay + withoutPay} ${isUndertime ? 'hr(s)' : 'day(s)'})`, when: 'just now' });
+    res.status(201).json({ success: true, remainingBalance: emp.leaveBalance, data: lr });
   } catch (error) {
-    console.error('❌ Submit leave error:', error);
-    res.status(500).json({ 
-      error: 'Failed to submit leave request: ' + error.message,
-      stack: error.stack 
-    });
+    console.error('Submit leave error:', error);
+    res.status(500).json({ error: 'Failed to submit leave request: ' + error.message });
   }
 });
 
 app.put('/api/leave-requests/:id', async (req, res) => {
   try {
-    const { status } = req.body;
-    const updated = await LeaveRequest.findByIdAndUpdate(
-      req.params.id, 
-      { status }, 
-      { new: true }
-    );
-    if (!updated) return res.status(404).json({ error: 'Leave request not found' });
+    const { status, hrReply, approvedWithPay, approvedWithoutPay } = req.body || {};
+    if (!['Approved', 'Rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-    await Activity.create({ 
-      icon: status === 'Approved' ? 'fa-check-circle' : 'fa-times-circle', 
-      text: `${updated.name}'s leave request was ${status.toLowerCase()}`, 
-      when: 'just now' 
+    const lr = await LeaveRequest.findById(req.params.id);
+    if (!lr) return res.status(404).json({ error: 'Leave request not found' });
+    if (lr.status !== 'Pending') return res.status(400).json({ error: 'This request was already decided.' });
+
+    const reply = String(hrReply || '').trim();
+    if (status === 'Rejected' && !reply) return res.status(400).json({ error: 'Please write the reason for declining.' });
+
+    const emp = await Employee.findOne({ email: emailMatch(lr.email) });
+    const isUndertime = lr.type === 'Undertime';
+
+    if (status === 'Rejected') {
+      if (emp && lr.deducted) { emp.leaveBalance += lr.deducted; await emp.save(); }   // give the days back
+      lr.deducted = 0; lr.approvedWithPay = 0; lr.approvedWithoutPay = 0;
+    } else {
+      const aw  = approvedWithPay    !== undefined ? Math.max(0, Number(approvedWithPay) || 0)    : lr.appliedWithPay;
+      const awo = approvedWithoutPay !== undefined ? Math.max(0, Number(approvedWithoutPay) || 0) : lr.appliedWithoutPay;
+      const newDeduct = isUndertime ? 0 : aw;
+      if (emp) {
+        const available = emp.leaveBalance + (lr.deducted || 0);
+        if (newDeduct > available) return res.status(400).json({ error: `Employee only has ${available} day(s) available for W/PAY.` });
+        emp.leaveBalance = available - newDeduct;
+        await emp.save();
+      }
+      lr.deducted = newDeduct; lr.approvedWithPay = aw; lr.approvedWithoutPay = awo;
+    }
+
+    const admin = await User.findById(req.user.id);
+    lr.status = status;
+    lr.hrReply = reply;
+    lr.decidedBy = admin ? admin.name : 'HR';
+    lr.decidedAt = manilaNow().date;
+    await lr.save();
+
+    await Activity.create({
+      icon: status === 'Approved' ? 'fa-check-circle' : 'fa-times-circle',
+      text: `${lr.name}'s leave request was ${status === 'Approved' ? 'approved' : 'declined'}`, when: 'just now'
     });
-    res.json(updated);
+    res.json(lr);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update leave request' });
   }
