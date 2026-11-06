@@ -5705,6 +5705,308 @@ window.viewEmployee = function (id) {
   row.innerHTML = `<span>Compliance Documents</span><span>${c.done}/${c.total} submitted <button class="btn btn-outline btn-sm" style="margin-left:8px;" onclick="showEmployeeCompliance('${id}')">Check</button></span>`;
   body.insertBefore(row, last);
 };
+
+// ═══════════ LEAVE FORM (Benedicto paper format) ═══════════
+const LF_CSS = `
+.lf{border-right:1px solid #2b3345;border-bottom:1px solid #2b3345;background:#fff;font-size:12.5px;color:#111;min-width:680px;max-width:780px;margin:0 auto}
+.lf-head{text-align:center;padding:10px 0 10px}
+.lf-head b{font-size:16px;display:block}
+.lf-head small{display:block;font-size:10.5px;margin:2px 0 8px}
+.lf-head u{font-weight:700;font-size:13px}
+.lf-g{display:grid}
+.lf-c{padding:6px 8px;border-top:1px solid #2b3345;border-left:1px solid #2b3345;min-height:36px}
+.lf-c i{font-style:italic;font-weight:700;font-size:11.5px;display:block;margin-bottom:2px}
+.lf-box{display:inline-block;width:14px;height:14px;border:1px solid #2b3345;border-radius:3px;text-align:center;line-height:13px;margin-right:6px;font-size:11px;font-weight:700;vertical-align:middle}
+.lf-t{width:100%;border-collapse:separate;border-spacing:0}
+.lf-t th,.lf-t td{border-top:1px solid #2b3345;border-left:1px solid #2b3345;padding:6px 8px;text-align:center;font-size:12px}
+.lf-t th{background:#e4e8ee;font-weight:700;color:#111;text-transform:none;letter-spacing:0}
+.lf-signame{text-align:center;margin-top:14px;font-weight:600}
+.lf-sig{border-top:1px solid #2b3345;text-align:center;font-size:11px;padding-top:2px;margin:0 14px}
+.lf-stamp{font-weight:800;text-align:center;margin-top:8px}
+.lf-types{display:flex;gap:16px;flex-wrap:wrap}
+.lf-type{display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink);font-style:normal;cursor:pointer}
+.lf-type input{width:auto}
+`;
+(function () { const s = document.createElement('style'); s.textContent = LF_CSS; document.head.appendChild(s); })();
+
+// Read-only copy of the paper form (used by employee, HR review and printing)
+function leaveFormHTML(l) {
+  const chk = t => `<span class="lf-box">${l.type === t ? '✔' : ''}</span>`;
+  const emp = employees.find(e => (e.email || '').trim().toLowerCase() === (l.email || '').trim().toLowerCase());
+  const hasSplit = (l.appliedWithPay || 0) + (l.appliedWithoutPay || 0) > 0;
+  const aw  = hasSplit ? l.appliedWithPay : (l.daysRequested || 0);
+  const awo = hasSplit ? l.appliedWithoutPay : 0;
+  const decided = l.status !== 'Pending';
+  const approved = l.status === 'Approved';
+  const unit = l.type === 'Undertime' ? 'hr(s)' : 'day(s)';
+  const stamp = approved ? '<span style="color:#1e7d3f;">APPROVED</span>' : (l.status === 'Rejected' ? '<span style="color:#b3271f;">DECLINED</span>' : '<span style="color:#9a6a10;">PENDING</span>');
+  return `
+  <div class="lf">
+    <div class="lf-head"><b>BENEDICTO COLLEGE, INC.</b><small>A.S. Fortuna St., Mandaue City</small><u>APPLICATION FOR LEAVE OF ABSENCE and UNDERTIME</u></div>
+    <div class="lf-g" style="grid-template-columns:2fr 1fr;">
+      <div class="lf-c"><i>Employee No.:</i>${escBio(l.employeeNo || (emp && emp.id) || '-')}</div>
+      <div class="lf-c"><i>Date Filed:</i>${escBio(l.dateFiled || '-')}</div>
+      <div class="lf-c"><i>Employee Name:</i>${escBio(l.name)}</div>
+      <div class="lf-c"><i>Department:</i>${escBio(l.dept)}</div>
+    </div>
+    <div class="lf-g" style="grid-template-columns:1fr 1.2fr .8fr;">
+      <div class="lf-c" style="grid-row:span 2;"><i>TYPE OF LEAVE:</i>
+        <div style="margin-top:6px;line-height:2;">${chk('Vacation Leave')}Vacation Leave &nbsp; ${chk('Undertime')}Undertime<br>${chk('Sick Leave')}Sick Leave &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ${chk('Others')}Others</div></div>
+      <div class="lf-c"><i>DATE(S) OF LEAVE/UNDERTIME:</i>${escBio(l.dates)}</div>
+      <div class="lf-c"><i>SPECIFIED TIME:</i>${escBio(l.specifiedTime || '')}</div>
+      <div class="lf-c" style="grid-column:span 2;"><i>REASON:</i>${escBio(l.reason || '')}</div>
+    </div>
+    <table class="lf-t">
+      <tr><th rowspan="3" style="width:22%;">TYPE OF<br>LEAVE</th><th colspan="4">NO. OF DAYS/HOURS</th></tr>
+      <tr><th colspan="2">APPLIED</th><th colspan="2">APPROVED</th></tr>
+      <tr><th>W/PAY</th><th>W/OUT PAY</th><th>W/PAY</th><th>W/OUT PAY</th></tr>
+      <tr style="height:44px;"><td>${escBio(l.type)}</td><td>${aw || ''}</td><td>${awo || ''}</td>
+        <td>${approved ? l.approvedWithPay : ''}</td><td>${approved ? l.approvedWithoutPay : ''}</td></tr>
+    </table>
+    <div class="lf-g" style="grid-template-columns:1fr 1fr 1fr;">
+      <div class="lf-c" style="min-height:90px;"><i>Requested:</i><div class="lf-signame">${escBio(l.name)}</div><div class="lf-sig">Employee's Signature</div></div>
+      <div class="lf-c"><i>Noted:</i><div class="lf-signame">${decided ? escBio(l.decidedBy || '') : '&nbsp;'}</div><div class="lf-sig">HR Officer</div></div>
+      <div class="lf-c" style="grid-row:span 2;"><i>For Accounting Use Only:</i><div style="margin-top:22px;">Date Received: ________________</div><div style="margin-top:22px;">Received by: _________________</div></div>
+      <div class="lf-c" style="min-height:80px;"><i>Endorsed for Approval:</i><div class="lf-signame">&nbsp;</div><div class="lf-sig">Department Head/Dean</div></div>
+      <div class="lf-c"><i>Approved:</i><div class="lf-stamp">${stamp}</div><div class="lf-sig" style="margin-top:6px;">Director for Academic Affairs</div></div>
+    </div>
+  </div>
+  ${l.hrReply ? `<p style="font-size:12.5px;margin:10px 0 0;"><strong>HR Reply:</strong> ${escBio(l.hrReply)}</p>` : ''}`;
+}
+
+window.printLeaveForm = function (id) {
+  const l = leaveRequests.find(x => x._id === id);
+  if (!l) return;
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Leave Application</title>
+    <style>@page{size:A4 landscape;margin:12mm} body{font-family:'Segoe UI',Arial,sans-serif;padding:20px} ${LF_CSS}</style></head>
+    <body>${leaveFormHTML(l)}<script>setTimeout(()=>window.print(),400)<\/script></body></html>`);
+  w.document.close();
+};
+
+// ─── EMPLOYEE: fill-out form (same layout as the paper) ───
+let _lfBal = 0;
+window.leaveFormRecalc = function () {
+  const type = (document.querySelector('input[name="leave_type"]:checked') || {}).value;
+  const isU = type === 'Undertime';
+  document.getElementById('leave_time_wrap').style.display = isU ? 'block' : 'none';
+  document.getElementById('leave_end_wrap').style.display = isU ? 'none' : 'block';
+  document.getElementById('lf_unit').textContent = isU ? 'hours' : 'days';
+  const hint = document.getElementById('lf_hint');
+  if (isU) { hint.textContent = 'Enter the number of hours of undertime.'; return; }
+  const s = document.getElementById('leave_start').value, e = document.getElementById('leave_end').value;
+  if (!s || !e || new Date(s) > new Date(e)) return;
+  const days = Math.round((new Date(e + 'T00:00:00') - new Date(s + 'T00:00:00')) / 86400000) + 1;
+  const pay = Math.min(days, _lfBal);
+  document.getElementById('leave_wpay').value = pay;
+  document.getElementById('leave_wopay').value = days - pay;
+  hint.textContent = `${days} day(s) total. Days beyond your leave balance (${_lfBal}) go to "W/OUT PAY" automatically — you can edit them.`;
+};
+
+window.showFileLeaveModal = function () {
+  const e = getCurrentEmployee();
+  if (!e) { showToast('Employee record not found. Please log in again.', 'fa-triangle-exclamation'); return; }
+  _lfBal = e.leaveBalance !== undefined ? e.leaveBalance : 0;
+  const today = todayStr();
+  const ro = 'background:#eef0f8;color:var(--sub);';
+  openModal(`
+    <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+    <div style="text-align:center;margin-bottom:12px;">
+      <div style="font-weight:800;font-size:16px;">BENEDICTO COLLEGE, INC.</div>
+      <div style="font-size:11px;color:var(--sub);">A.S. Fortuna St., Mandaue City</div>
+      <div style="font-weight:700;font-size:13px;text-decoration:underline;margin-top:6px;">APPLICATION FOR LEAVE OF ABSENCE and UNDERTIME</div>
+    </div>
+    <div class="error-msg" id="leaveReqError"></div>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="field"><label>Employee No.</label><input type="text" value="${escBio(e.id)}" disabled style="${ro}" /></div>
+      <div class="field"><label>Date Filed</label><input type="text" value="${today}" disabled style="${ro}" /></div>
+      <div class="field"><label>Employee Name</label><input type="text" value="${escBio(e.first + ' ' + e.last)}" disabled style="${ro}" /></div>
+      <div class="field"><label>Department</label><input type="text" value="${escBio(e.department)}" disabled style="${ro}" /></div>
+    </div>
+    <div class="field" style="margin-top:14px;"><label>Type of Leave</label>
+      <div class="lf-types">
+        ${['Vacation Leave', 'Sick Leave', 'Undertime', 'Others'].map((t, i) => `<label class="lf-type"><input type="radio" name="leave_type" value="${t}" ${i === 0 ? 'checked' : ''} onchange="leaveFormRecalc()" /> ${t}</label>`).join('')}
+      </div>
+    </div>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;margin-top:14px;">
+      <div class="field"><label>Date(s) of Leave/Undertime — Start</label><input id="leave_start" type="date" min="${today}" onchange="leaveFormRecalc()" /></div>
+      <div class="field" id="leave_end_wrap"><label>End Date</label><input id="leave_end" type="date" min="${today}" onchange="leaveFormRecalc()" /></div>
+    </div>
+    <div class="field" id="leave_time_wrap" style="display:none;margin-top:10px;"><label>Specified Time</label><input id="leave_time" type="text" placeholder="e.g. 3:00 PM - 5:00 PM" /></div>
+    <div class="field" style="margin-top:10px;"><label>Reason</label><input id="leave_reason" type="text" placeholder="Reason for your leave/undertime" /></div>
+    <div class="field" style="margin-top:14px;"><label>No. of <span id="lf_unit">days</span> — Applied (Leave balance: ${_lfBal} day(s))</label>
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+        <div><label style="font-size:11px;">W/PAY</label><input id="leave_wpay" type="number" min="0" step="0.5" value="0" /></div>
+        <div><label style="font-size:11px;">W/OUT PAY</label><input id="leave_wopay" type="number" min="0" step="0.5" value="0" /></div>
+      </div>
+      <p id="lf_hint" style="font-size:11.5px;color:var(--sub);margin:6px 0 0;font-style:normal;"></p>
+    </div>
+    <button class="btn btn-navy" style="width:100%;margin-top:14px;" onclick="submitLeaveRequest()">Submit Application</button>
+  `, true);
+};
+
+window.submitLeaveRequest = async function () {
+  const errEl = document.getElementById('leaveReqError');
+  const fail = m => { errEl.textContent = m; errEl.classList.add('show'); showToast(m, 'fa-triangle-exclamation'); };
+  errEl.classList.remove('show');
+
+  const type = document.querySelector('input[name="leave_type"]:checked').value;
+  const isU = type === 'Undertime';
+  const start = document.getElementById('leave_start').value;
+  const end = isU ? start : document.getElementById('leave_end').value;
+  const reason = document.getElementById('leave_reason').value.trim();
+  const specifiedTime = document.getElementById('leave_time').value.trim();
+  const wpay = parseFloat(document.getElementById('leave_wpay').value) || 0;
+  const wopay = parseFloat(document.getElementById('leave_wopay').value) || 0;
+
+  if (!start || !end) return fail('Please select the date(s).');
+  if (new Date(start) > new Date(end)) return fail('End date must be after start date.');
+  if (isU && !specifiedTime) return fail('Please enter the specified time for Undertime.');
+  if (!reason) return fail('Please write your reason.');
+  if (wpay + wopay <= 0) return fail('Enter the number of days/hours applied.');
+  if (!isU && wpay > _lfBal) return fail(`Only ${_lfBal} day(s) left for W/PAY. Put the rest under W/OUT PAY.`);
+
+  const e = getCurrentEmployee();
+  if (!e) return fail('Employee record not found. Please log in again.');
+  const fmt = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const dates = start === end ? fmt(start) : fmt(start) + ' - ' + fmt(end);
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/leave-requests/submit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: currentUser.name, email: e.email || currentUser.email, dept: e.department,
+        type, dates, startDate: start, endDate: end, reason, specifiedTime,
+        appliedWithPay: wpay, appliedWithoutPay: wopay
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) return fail(data.error || 'Failed to submit leave request.');
+    if (data.data && data.data._id) selectedLeaveRequestId = data.data._id;
+    await reloadAndRender();
+    closeModal();
+    showToast('Application submitted!');
+    requestAnimationFrame(() => { const p = document.getElementById('leaveTrackerPanel'); if (p) p.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+  } catch (err) { fail('Failed to submit. Please check your internet connection.'); }
+};
+
+// ─── EMPLOYEE: list page now shows the HR reply ───
+function employeeLeavePage() {
+  const e = getCurrentEmployee();
+  const myLeaves = leaveRequests.filter(l => (l.email || '').trim().toLowerCase() === (currentUser?.email || '').trim().toLowerCase());
+  const bal = e?.leaveBalance !== undefined ? e.leaveBalance : 0;
+  const pendingCount = myLeaves.filter(l => l.status === 'Pending').length;
+  return `
+    <div class="page-header-flex">
+      <div>
+        <h1 class="page-title" style="margin-bottom:4px;">Leave Requests</h1>
+        <p class="page-sub" style="margin-bottom:0;">File your Application for Leave of Absence and Undertime. Click a row to track it or view the form.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:8px 16px;">
+          <div style="width:32px;height:32px;border-radius:9px;background:#fdf0dc;display:flex;align-items:center;justify-content:center;color:var(--amber);"><i class="fas fa-hourglass-half"></i></div>
+          <div><div style="font-size:17px;font-weight:800;font-family:'Poppins',sans-serif;line-height:1;">${pendingCount}</div>
+          <div style="font-size:10px;font-weight:700;color:var(--sub);text-transform:uppercase;">Pending Requests</div></div>
+        </div>
+        <button class="btn btn-navy" style="height:42px;display:inline-flex;align-items:center;gap:8px;" onclick="showFileLeaveModal()"><i class="fas fa-plus"></i> File Leave Request</button>
+      </div>
+    </div>
+    <div class="panel" style="padding:0;overflow-x:auto;">
+      <table>
+        <thead><tr><th>Type</th><th>Dates</th><th>Reason</th><th>Status</th><th>HR Reply</th></tr></thead>
+        <tbody>
+          ${myLeaves.length ? myLeaves.map(l => `
+            <tr style="cursor:pointer;" onclick="selectMyLeaveRequest('${l._id}')">
+              <td>${escBio(l.type)}</td><td>${escBio(l.dates)}</td><td>${escBio(l.reason || '-')}</td>
+              <td><span class="pill ${l.status === 'Pending' ? 'pill-pending' : (l.status === 'Approved' ? 'pill-approved' : 'pill-rejected')}">${l.status === 'Rejected' ? 'Declined' : l.status}</span></td>
+              <td style="max-width:240px;font-size:12.5px;">${escBio(l.hrReply || '-')}</td>
+            </tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-calendar"></i><p>No leave requests filed yet.</p></div></td></tr>`}
+        </tbody>
+      </table>
+      <div style="padding:14px 20px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub);">
+        <i class="fas fa-wallet" style="color:var(--navy-light);"></i> Leave Balance: <strong style="color:var(--ink);">${bal} day(s)</strong>
+      </div>
+    </div>
+    ${selectedLeaveRequestId && myLeaves.some(l => l._id === selectedLeaveRequestId) ? leaveTrackerPanelHTML(myLeaves) : ''}
+  `;
+}
+
+function leaveTrackerPanelHTML(myLeaves) {
+  const l = myLeaves.find(x => x._id === selectedLeaveRequestId);
+  if (!l) return '';
+  const isRejected = l.status === 'Rejected', isDecided = l.status !== 'Pending';
+  return `
+    <div class="box-roster-panel" id="leaveTrackerPanel">
+      <div class="box-roster-head">
+        <div class="box-roster-icon"><i class="fas fa-plane-departure"></i></div>
+        <div style="flex:1;min-width:0;"><h3>${escBio(l.type)}</h3><p>${escBio(l.dates)}</p></div>
+        <button class="btn btn-outline btn-sm" onclick="printLeaveForm('${l._id}')"><i class="fas fa-print"></i> Print Form</button>
+        <button class="box-roster-close" onclick="selectMyLeaveRequest(null)"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="leave-progress">
+        <div class="lp-step done"><div class="lp-dot"><i class="fas fa-paper-plane"></i></div><div class="lp-label">Submitted</div></div>
+        <div class="lp-line ${isDecided ? 'done' : ''}"></div>
+        <div class="lp-step ${isDecided ? 'done' : 'current'}"><div class="lp-dot"><i class="fas fa-magnifying-glass"></i></div><div class="lp-label">Under Review</div></div>
+        <div class="lp-line ${l.status === 'Approved' ? 'done' : (isRejected ? 'rejected' : '')}"></div>
+        <div class="lp-step ${l.status === 'Approved' ? 'done' : (isRejected ? 'rejected' : '')}"><div class="lp-dot"><i class="fas ${isRejected ? 'fa-xmark' : 'fa-check'}"></i></div><div class="lp-label">${isRejected ? 'Declined' : 'Approved'}</div></div>
+      </div>
+      ${isRejected && l.hrReply ? `<div class="reply-box" style="border-left-color:var(--red);"><div class="reply-label" style="color:var(--red);"><i class="fas fa-reply"></i> Reason from HR</div>${escBio(l.hrReply)}</div>` : ''}
+      ${l.status === 'Approved' && l.hrReply ? `<div class="reply-box"><div class="reply-label">HR Note</div>${escBio(l.hrReply)}</div>` : ''}
+      <div style="overflow-x:auto;margin-top:16px;">${leaveFormHTML(l)}</div>
+    </div>`;
+}
+
+// ─── ADMIN: Approve / Reject buttons now open a review window ───
+window.actLeave = function (id, preset) { openLeaveReview(id, preset); };
+
+window.openLeaveReview = function (id, preset) {
+  const l = leaveRequests.find(x => x._id === id);
+  if (!l) return;
+  const hasSplit = (l.appliedWithPay || 0) + (l.appliedWithoutPay || 0) > 0;
+  const aw = hasSplit ? l.appliedWithPay : (l.daysRequested || 0);
+  const awo = hasSplit ? l.appliedWithoutPay : 0;
+  const unit = l.type === 'Undertime' ? 'hour(s)' : 'day(s)';
+  openModal(`
+    <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+    <h2 style="margin-top:0;">Review Leave Application</h2>
+    <div style="overflow-x:auto;">${leaveFormHTML(l)}</div>
+    <div class="report-section-title">Approved ${unit}</div>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="field"><label>W/PAY</label><input id="lr_pay" type="number" min="0" step="0.5" value="${aw}" /></div>
+      <div class="field"><label>W/OUT PAY</label><input id="lr_wopay" type="number" min="0" step="0.5" value="${awo}" /></div>
+    </div>
+    <div class="field" style="margin-top:10px;"><label>HR Reply / Reason (required when declining)</label>
+      <textarea id="lr_reply" placeholder="e.g. Not enough staff coverage on those dates." style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#f6f7fb;font-family:inherit;font-size:13.5px;min-height:70px;"></textarea></div>
+    <div style="display:flex;gap:10px;margin-top:14px;">
+      <button class="btn btn-outline" style="flex:1" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-red" style="flex:1" onclick="confirmLeaveDecision('${l._id}','Rejected')"><i class="fas fa-times"></i> Decline</button>
+      <button class="btn btn-green" style="flex:1" onclick="confirmLeaveDecision('${l._id}','Approved')"><i class="fas fa-check"></i> Approve</button>
+    </div>
+  `, true);
+  if (preset === 'Rejected') setTimeout(() => { const t = document.getElementById('lr_reply'); if (t) t.focus(); }, 100);
+};
+
+window.confirmLeaveDecision = async function (id, status) {
+  const reply = document.getElementById('lr_reply').value.trim();
+  if (status === 'Rejected' && !reply) { showToast('Please write the reason for declining', 'fa-triangle-exclamation'); return; }
+  try {
+    const res = await fetch(`${API_BASE_URL}/leave-requests/${id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status, hrReply: reply,
+        approvedWithPay: document.getElementById('lr_pay').value,
+        approvedWithoutPay: document.getElementById('lr_wopay').value
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to update', 'fa-triangle-exclamation'); return; }
+    closeModal();
+    await reloadAndRender();
+    showToast(status === 'Approved' ? 'Leave approved' : 'Leave declined — reason sent to employee');
+  } catch (e) { showToast('Failed to update leave request', 'fa-triangle-exclamation'); }
+};
+// ═══════════ END LEAVE FORM ═══════════
+
 // ═══════════ END BIOMETRIC + COMPLIANCE ═══════════
 
     (async function boot() {
