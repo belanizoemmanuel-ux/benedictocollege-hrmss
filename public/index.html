@@ -6007,7 +6007,348 @@ window.confirmLeaveDecision = async function (id, status) {
 };
 // ═══════════ END LEAVE FORM ═══════════
 
-// ═══════════ END BIOMETRIC + COMPLIANCE ═══════════
+// ═══════════ PRE-EMPLOYMENT CHECKLIST (replaces Compliance Documents) ═══════════
+const CK_CSS = `
+.ck-alert{display:flex;align-items:center;gap:12px;background:#fde7e6;border:1px solid #f5c2be;color:#8a1f17;border-radius:14px;padding:14px 16px;margin-bottom:16px}
+.ck-alert i{font-size:20px}
+.ck-alert .ck-go{margin-left:auto;flex-shrink:0}
+.ck-ok{background:#e2f7e8;border-color:#bfe8cb;color:#1e7d3f}
+.ck-group{font-size:11.5px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.8px;margin:18px 0 8px}
+.ck-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;margin-bottom:8px}
+.ck-row.missing{background:#fff7f6;border-color:#f5c2be}
+.ck-row.done{background:#f1faf4;border-color:#cfeedb}
+.ck-row.na{background:#f4f5f9}
+.ck-label{flex:1;min-width:200px;font-size:13.5px;font-weight:600;color:var(--ink)}
+.ck-note{display:block;font-size:11.5px;font-weight:500;color:var(--sub);font-style:italic}
+.ck-seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex-shrink:0}
+.ck-seg button{border:none;background:#fff;padding:6px 10px;font-size:11.5px;font-weight:700;color:var(--sub);cursor:pointer;font-family:inherit}
+.ck-seg button+button{border-left:1px solid var(--line)}
+.ck-seg button.on-sub{background:var(--green);color:#fff}
+.ck-seg button.on-na{background:#6b7085;color:#fff}
+.ck-seg button.on-miss{background:var(--red);color:#fff}
+`;
+(function () { const s = document.createElement('style'); s.textContent = CK_CSS; document.head.appendChild(s); })();
+
+// Items follow the paper "Pre-Employment Checklist (for Newly Hired Employees)"
+const CHECKLIST_ITEMS = [
+  { key: 'resume',    group: 'Application', label: 'Letter of Application and Resume' },
+  { key: 'classobs',  group: 'Application', label: 'Classroom Evaluation / Observation Results', note: 'for instructor/teacher applicants only' },
+
+  { key: 'sss',       group: 'Government IDs (photocopy)', label: 'SSS ID' },
+  { key: 'phic',      group: 'Government IDs (photocopy)', label: 'PHIC ID' },
+  { key: 'hdmf',      group: 'Government IDs (photocopy)', label: 'HDMF ID' },
+  { key: 'prc',       group: 'Government IDs (photocopy)', label: 'PRC ID – not expired', note: 'if applicable' },
+  { key: 'tin',       group: 'Government IDs (photocopy)', label: 'TIN card', note: 'if applicable' },
+  { key: 'license',   group: 'Government IDs (photocopy)', label: "Driver's License", note: 'for DRIVER applicant only' },
+
+  { key: 'diploma',   group: 'Educational Attainment Credentials', label: 'Diploma' },
+  { key: 'tesda',     group: 'Educational Attainment Credentials', label: 'Certifications (TESDA)', note: 'if any' },
+  { key: 'tor_bacc',  group: 'Educational Attainment Credentials', label: 'Transcript of Records – Baccalaureate Degree', note: 'honors, if any' },
+  { key: 'tor_mast',  group: 'Educational Attainment Credentials', label: 'Transcript of Records – Masters Degree', note: 'honors, if any' },
+  { key: 'tor_doc',   group: 'Educational Attainment Credentials', label: 'Transcript of Records – Doctors Degree', note: 'honors, if any' },
+
+  { key: 'birth',     group: 'Civil Documents (photocopy)', label: 'Certificate of Live Birth (NSO)' },
+  { key: 'marriage',  group: 'Civil Documents (photocopy)', label: 'Certificate of Marriage (NSO)', note: 'if applicable' },
+  { key: 'childbirth',group: 'Civil Documents (photocopy)', label: 'Certificates of Live Birth of Children (NSO)', note: 'if applicable' },
+
+  { key: 'nbi',       group: 'Other Requirements', label: 'NBI Clearance', note: 'not later than 1 year ago' },
+  { key: 'passport',  group: 'Other Requirements', label: 'Photocopy of Passport', note: 'if applicable' },
+  { key: 'prevemp',   group: 'Other Requirements', label: "Photocopies (w/ original) of prev. employer's clearance or Cert. of Employment", note: 'if applicable' },
+  { key: 'photos',    group: 'Other Requirements', label: '3 copies of 2 x 2 colored picture (w/ blue background)' },
+  { key: 'bir2316',   group: 'Other Requirements', label: 'BIR Form 2316', note: 'if with previous employer during the year' },
+  { key: 'loan',      group: 'Other Requirements', label: 'Loan Voucher (SSS & HDMF)', note: 'for those w/ existing loans' },
+  { key: 'sketch',    group: 'Other Requirements', label: 'Sketch of current address' },
+  { key: 'labs',      group: 'Other Requirements', label: 'Lab results of CBC, X-ray & Urinalysis', note: 'not more than 6 months' },
+  { key: 'medclear',  group: 'Other Requirements', label: 'Medical clearance from School Physician' },
+
+  { key: 'eis',       group: 'Duly Accomplished Forms', label: 'Employee Information Sheet' },
+  { key: 'atm',       group: 'Duly Accomplished Forms', label: 'Opening of ATM Payroll Savings Account' },
+  { key: 'bir1902',   group: 'Duly Accomplished Forms', label: 'BIR Form 1902 – Registration (for no TIN yet) or BIR 2305 (for updates)' },
+  { key: 'hdmfform',  group: 'Duly Accomplished Forms', label: 'HDMF M1-Form (for not member yet) or FPF 110 (for any update)' },
+  { key: 'phicform',  group: 'Duly Accomplished Forms', label: 'PHIC Form PMRF (for not member yet) or M2 (for any updates)' },
+
+  { key: 'contract',  group: 'Contract', label: 'Duly signed Contract of Employment' }
+];
+
+let checklistSummary = [];                      // admin: [{employeeId, done:[keys], requested}]
+let myChecklist = { entries: [], meta: {} };    // employee: own checklist
+let adminChecklist = { entries: [], meta: {}, empId: null };
+let ckFilter = 'all';
+
+function ckStatusMap(entries) { const m = {}; (entries || []).forEach(x => { m[x.key] = x; }); return m; }
+function ckFmtDate(d) { return d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''; }
+function ckMyMissingCount() {
+  if (!currentUser || currentUser.role !== 'employee' || !(myChecklist.meta || {}).requested) return 0;
+  const map = ckStatusMap(myChecklist.entries);
+  return CHECKLIST_ITEMS.filter(i => !map[i.key]).length;
+}
+
+// ── loaders (same names the old code calls) ──
+function complianceCountFor(empId) {
+  const s = checklistSummary.find(x => x.employeeId === empId);
+  const types = s ? s.done : [];
+  return { done: CHECKLIST_ITEMS.filter(i => types.includes(i.key)).length, total: CHECKLIST_ITEMS.length, types };
+}
+async function loadComplianceSummary() {
+  try {
+    const r = await fetch(`${API_BASE_URL}/checklist/summary`);
+    const d = r.ok ? await r.json() : [];
+    checklistSummary = Array.isArray(d) ? d : [];
+  } catch (e) { checklistSummary = []; }
+}
+async function loadMyCompliance() {
+  const e = getCurrentEmployee();
+  if (!e) { myChecklist = { entries: [], meta: {} }; return; }
+  try {
+    const r = await fetch(`${API_BASE_URL}/checklist/employee/${encodeURIComponent(e.id)}`);
+    const d = r.ok ? await r.json() : null;
+    myChecklist = d && Array.isArray(d.entries) ? d : { entries: [], meta: {} };
+  } catch (err) { myChecklist = { entries: [], meta: {} }; }
+}
+
+// employees also load their checklist every time data loads (for the banner + sidebar badge)
+const _ckLoadData = loadData;
+loadData = async function () {
+  await _ckLoadData();
+  if (currentUser && currentUser.role === 'employee') await loadMyCompliance();
+};
+
+// sidebar names / badge
+const _ckAdminNav = adminNav.find(i => i.id === 'compliance');
+if (_ckAdminNav) { _ckAdminNav.label = 'Pre-Employment Checklist'; _ckAdminNav.icon = 'fa-clipboard-check'; }
+const _ckEmpNav = employeeNav.find(i => i.id === 'employment');
+if (_ckEmpNav) _ckEmpNav.badge = () => ckMyMissingCount();
+
+// ═══ EMPLOYEE SIDE ═══
+function ckMissingBannerHTML() {
+  if (!currentUser || currentUser.role !== 'employee') return '';
+  const n = ckMyMissingCount();
+  if (!n) return '';
+  const due = (myChecklist.meta || {}).dueDate ? ` Please submit on or before <strong>${ckFmtDate(myChecklist.meta.dueDate)}</strong>.` : '';
+  return `<div class="ck-alert"><i class="fas fa-triangle-exclamation"></i>
+    <div><strong>${n} pre-employment requirement(s) missing.</strong>${due}</div>
+    <button class="btn btn-red btn-sm ck-go" onclick="goTo('employment')">Attach now</button></div>`;
+}
+const _ckOrigDash = employeeDashboard;
+employeeDashboard = function () { return ckMissingBannerHTML() + _ckOrigDash(); };
+
+// shown under Employment Info (name kept so the old hook calls it)
+function complianceUploadSectionHTML() {
+  const e = getCurrentEmployee();
+  if (!e) return '';
+  const meta = myChecklist.meta || {};
+  if (!meta.requested) {
+    return `<div class="info-section" style="margin-top:18px;"><div class="section-title">Pre-Employment Checklist</div>
+      <p style="font-size:13px;color:var(--sub);margin:0;">HR has not requested any documents from you yet. If something is missing, it will show up here.</p></div>`;
+  }
+  const map = ckStatusMap(myChecklist.entries);
+  const missingN = CHECKLIST_ITEMS.filter(i => !map[i.key]).length;
+  const done = CHECKLIST_ITEMS.length - missingN;
+  let html = '', last = '';
+  CHECKLIST_ITEMS.forEach(i => {
+    if (i.group !== last) { last = i.group; html += `<div class="ck-group">${i.group}</div>`; }
+    const en = map[i.key];
+    const st = !en ? 'missing' : (en.status === 'NA' ? 'na' : 'done');
+    const attach = (label, icon) => `<label class="photo-upload-btn"><i class="fas ${icon}"></i> ${label}<input type="file" accept="image/*" onchange="uploadChecklistDoc(this,'${i.key}')" /></label>`;
+    let right;
+    if (!en) right = `<span class="pill pill-rejected">Missing</span>${attach('Attach', 'fa-upload')}`;
+    else if (en.status === 'NA') right = `<span class="pill" style="background:#eef0f8;color:#6b7085;">Not required</span>`;
+    else right = `<span class="pill pill-approved">Submitted</span>${en.hasPhoto ? `<button class="btn btn-outline btn-sm" onclick="viewChecklistPhoto('${e.id}','${i.key}')">View</button>${attach('Replace', 'fa-rotate')}` : ''}`;
+    html += `<div class="ck-row ${st}"><div class="ck-label">${i.label}${i.note ? `<span class="ck-note">${i.note}</span>` : ''}</div>${right}</div>`;
+  });
+  return `
+    <div class="info-section" style="margin-top:18px;">
+      <div class="section-title">Pre-Employment Checklist — ${done}/${CHECKLIST_ITEMS.length} complete</div>
+      ${missingN
+        ? `<div class="ck-alert"><i class="fas fa-triangle-exclamation"></i><div><strong>${missingN} requirement(s) still missing.</strong> Attach a clear photo of each one marked Missing.${meta.dueDate ? ` Submit on or before <strong>${ckFmtDate(meta.dueDate)}</strong>.` : ''}</div></div>`
+        : `<div class="ck-alert ck-ok"><i class="fas fa-circle-check"></i><div><strong>All requirements complete. Thank you!</strong></div></div>`}
+      ${meta.remarks ? `<div class="reply-box" style="margin-bottom:6px;"><div class="reply-label">Remark from HR</div>${escBio(meta.remarks)}</div>` : ''}
+      ${html}
+    </div>`;
+}
+
+window.uploadChecklistDoc = async function (input, key) {
+  const e = getCurrentEmployee();
+  const file = input.files && input.files[0];
+  if (!e || !file) return;
+  if (!file.type.startsWith('image/')) { showToast('Please choose an image file', 'fa-triangle-exclamation'); return; }
+  try {
+    showToast('Uploading…', 'fa-spinner');
+    const photo = await compressImage(file);
+    const res = await fetch(`${API_BASE_URL}/checklist/employee/${encodeURIComponent(e.id)}/${key}/photo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ photo })
+    });
+    if (!res.ok) throw new Error();
+    await loadMyCompliance();
+    renderPage(); renderSidebar();
+    showToast('Attached! HR can now see it.');
+  } catch (err) { showToast('Upload failed. Please try again.', 'fa-triangle-exclamation'); }
+};
+
+window.viewChecklistPhoto = async function (empId, key, fromAdmin) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/checklist/employee/${encodeURIComponent(empId)}/${key}/photo`);
+    const data = await res.json();
+    if (!res.ok || !data.photo) { showToast('No photo attached', 'fa-triangle-exclamation'); return; }
+    const item = CHECKLIST_ITEMS.find(i => i.key === key);
+    openModal(`
+      <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+      <h3 style="margin-top:0;">${item ? item.label : key}</h3>
+      <img src="${data.photo}" style="width:100%;border-radius:12px;" />
+      <button class="btn btn-outline" style="width:100%;margin-top:14px;" onclick="${fromAdmin ? `showEmployeeCompliance('${empId}')` : 'closeModal()'}">${fromAdmin ? 'Back to checklist' : 'Close'}</button>
+    `, true);
+  } catch (e) { showToast('Could not load the photo', 'fa-triangle-exclamation'); }
+};
+
+// ═══ HR / ADMIN SIDE ═══
+window.setCkFilter = function (f) { ckFilter = f; renderPage(); };
+
+function compliancePage() {
+  const rows = [...employees]
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))
+    .map(e => {
+      const c = complianceCountFor(e.id);
+      const s = checklistSummary.find(x => x.employeeId === e.id);
+      return { e, ...c, requested: !!(s && s.requested) };
+    });
+  const complete = rows.filter(r => r.done === r.total).length;
+  const incomplete = rows.length - complete;
+  const list = ckFilter === 'complete' ? rows.filter(r => r.done === r.total)
+             : ckFilter === 'incomplete' ? rows.filter(r => r.done < r.total) : rows;
+  return `
+    <h1 class="page-title">Pre-Employment Checklist</h1>
+    <p class="page-sub">Tick what each employee already submitted. Blank items are sent to the employee's portal as "Missing" once you press Send.</p>
+    <div class="complaint-tabs">
+      <div class="complaint-tab ${ckFilter === 'all' ? 'active' : ''}" onclick="setCkFilter('all')"><span>All</span><span class="tab-badge" style="background:#6b7085;">${rows.length}</span></div>
+      <div class="complaint-tab ${ckFilter === 'complete' ? 'active' : ''}" onclick="setCkFilter('complete')"><i class="fas fa-circle-check tab-icon" style="color:${ckFilter === 'complete' ? '#fff' : 'var(--green)'};"></i><span>Complete</span><span class="tab-badge" style="background:var(--green);">${complete}</span></div>
+      <div class="complaint-tab ${ckFilter === 'incomplete' ? 'active' : ''}" onclick="setCkFilter('incomplete')"><i class="fas fa-triangle-exclamation tab-icon" style="color:${ckFilter === 'incomplete' ? '#fff' : 'var(--red)'};"></i><span>Incomplete</span><span class="tab-badge">${incomplete}</span></div>
+    </div>
+    <div class="panel" style="padding:0;overflow-x:auto;">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Done</th><th>Missing</th><th>Sent to Employee</th><th>Action</th></tr></thead>
+        <tbody>
+          ${list.length ? list.map(r => {
+            const miss = CHECKLIST_ITEMS.filter(i => !r.types.includes(i.key)).map(i => i.label);
+            const preview = miss.length ? miss.slice(0, 2).join(', ') + (miss.length > 2 ? ` +${miss.length - 2} more` : '') : '—';
+            return `<tr>
+              <td>${r.e.id}</td><td>${r.e.first} ${r.e.last}</td><td>${r.e.department}</td>
+              <td><strong>${r.done}/${r.total}</strong></td>
+              <td style="font-size:12px;color:var(--sub);max-width:280px;">${preview}</td>
+              <td>${r.requested ? '<span class="pill pill-approved">Sent</span>' : '<span class="pill pill-pending">Not sent</span>'}</td>
+              <td><button class="btn btn-outline btn-sm" onclick="showEmployeeCompliance('${r.e.id}')"><i class="fas fa-clipboard-check"></i> Check</button></td>
+            </tr>`;
+          }).join('') : `<tr><td colspan="7"><div class="empty-state"><i class="fas fa-clipboard-check"></i><p>No employees in this list.</p></div></td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function ckSyncSummary(empId) {
+  const keys = adminChecklist.entries.map(x => x.key);
+  const req = !!(adminChecklist.meta && adminChecklist.meta.requested);
+  const s = checklistSummary.find(x => x.employeeId === empId);
+  if (s) { s.done = keys; s.requested = req; } else checklistSummary.push({ employeeId: empId, done: keys, requested: req });
+}
+window.ckCloseModal = function () { closeModal(); if (currentUser && currentUser.role === 'admin' && currentPage === 'compliance') renderPage(); };
+
+window.showEmployeeCompliance = async function (empId) {
+  const e = employees.find(x => x.id === empId);
+  if (!e) return;
+  try {
+    const r = await fetch(`${API_BASE_URL}/checklist/employee/${encodeURIComponent(empId)}`);
+    const d = r.ok ? await r.json() : null;
+    adminChecklist = d && Array.isArray(d.entries) ? d : { entries: [], meta: {} };
+  } catch (err) { adminChecklist = { entries: [], meta: {} }; showToast('Failed to load checklist', 'fa-triangle-exclamation'); }
+  adminChecklist.empId = empId;
+  renderChecklistModal();
+};
+
+function renderChecklistModal() {
+  const e = employees.find(x => x.id === adminChecklist.empId);
+  if (!e) return;
+  const scroll = modalBody.scrollTop;
+  const map = ckStatusMap(adminChecklist.entries);
+  const meta = adminChecklist.meta || {};
+  const done = CHECKLIST_ITEMS.filter(i => map[i.key]).length;
+  let rows = '', last = '';
+  CHECKLIST_ITEMS.forEach(i => {
+    if (i.group !== last) { last = i.group; rows += `<div class="ck-group">${i.group}</div>`; }
+    const en = map[i.key];
+    const st = !en ? 'missing' : (en.status === 'NA' ? 'na' : 'done');
+    rows += `<div class="ck-row ${st}">
+      <div class="ck-label">${i.label}${i.note ? `<span class="ck-note">${i.note}</span>` : ''}</div>
+      ${en && en.hasPhoto ? `<button class="btn btn-outline btn-sm" onclick="viewChecklistPhoto('${e.id}','${i.key}',true)"><i class="fas fa-image"></i> Photo</button>` : ''}
+      <div class="ck-seg">
+        <button class="${en && en.status === 'Submitted' ? 'on-sub' : ''}" onclick="setChecklistStatus('${i.key}','Submitted')">✔ Submitted</button>
+        <button class="${en && en.status === 'NA' ? 'on-na' : ''}" onclick="setChecklistStatus('${i.key}','NA')">N/A</button>
+        <button class="${!en ? 'on-miss' : ''}" onclick="setChecklistStatus('${i.key}','Missing')">Blank</button>
+      </div></div>`;
+  });
+  openModal(`
+    <button class="modal-close" onclick="ckCloseModal()"><i class="fas fa-times"></i></button>
+    <h2 style="margin-top:0;">Pre-Employment Checklist</h2>
+    <p style="color:var(--sub);font-size:13px;margin:0 0 14px;"><strong style="color:var(--ink);">${escBio(e.first)} ${escBio(e.last)}</strong> · ${escBio(e.position)} · Date Hired: ${escBio(e.dateHired || '-')} — <strong>${done}/${CHECKLIST_ITEMS.length}</strong> complete</p>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="field"><label>Submit to HR Office on or before</label><input id="ck_due" type="date" value="${escBio(meta.dueDate || '')}" onchange="saveChecklistMeta()" /></div>
+      <div class="field"><label>Remark(s)</label><input id="ck_rem" type="text" value="${escBio(meta.remarks || '')}" onchange="saveChecklistMeta()" /></div>
+    </div>
+    <p style="font-size:12px;color:var(--sub);margin:10px 0 0;"><i class="fas fa-circle-info"></i> Press <strong>Submitted</strong> for what HR already has, <strong>N/A</strong> if it does not apply, and leave <strong>Blank</strong> for what is still missing. Blank items show as "Missing" on the employee's portal after you press Send.</p>
+    ${rows}
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn btn-outline" style="flex:1" onclick="ckCloseModal()">Close</button>
+      <button class="btn ${meta.requested ? 'btn-amber' : 'btn-navy'}" style="flex:1" onclick="toggleChecklistRequest()"><i class="fas fa-paper-plane"></i> ${meta.requested ? 'Sent to employee — Unsend' : 'Send to Employee Portal'}</button>
+    </div>
+  `, true);
+  modalBody.scrollTop = scroll;
+}
+
+window.setChecklistStatus = async function (key, status) {
+  const empId = adminChecklist.empId;
+  const had = ckStatusMap(adminChecklist.entries)[key];
+  if (status === 'Missing' && had && had.hasPhoto && !confirm('This also removes the photo the employee attached. Continue?')) return;
+  try {
+    const res = await fetch(`${API_BASE_URL}/checklist/employee/${encodeURIComponent(empId)}/${key}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+    });
+    if (!res.ok) throw new Error();
+    adminChecklist.entries = adminChecklist.entries.filter(x => x.key !== key);
+    if (status !== 'Missing') adminChecklist.entries.push({ key, status, hasPhoto: !!(had && had.hasPhoto) });
+    ckSyncSummary(empId);
+    renderChecklistModal();
+  } catch (err) { showToast('Failed to update item', 'fa-triangle-exclamation'); }
+};
+
+window.saveChecklistMeta = async function () {
+  const empId = adminChecklist.empId;
+  try {
+    const res = await fetch(`${API_BASE_URL}/checklist/employee/${encodeURIComponent(empId)}/meta`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dueDate: document.getElementById('ck_due').value, remarks: document.getElementById('ck_rem').value.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error();
+    adminChecklist.meta = data;
+    showToast('Saved');
+  } catch (err) { showToast('Failed to save', 'fa-triangle-exclamation'); }
+};
+
+window.toggleChecklistRequest = async function () {
+  const empId = adminChecklist.empId;
+  const next = !(adminChecklist.meta && adminChecklist.meta.requested);
+  try {
+    const res = await fetch(`${API_BASE_URL}/checklist/employee/${encodeURIComponent(empId)}/meta`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dueDate: document.getElementById('ck_due').value, remarks: document.getElementById('ck_rem').value.trim(), requested: next })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error();
+    adminChecklist.meta = data;
+    ckSyncSummary(empId);
+    renderChecklistModal();
+    showToast(next ? 'Sent — the employee now sees what is missing' : 'Unsent — hidden from the employee');
+  } catch (err) { showToast('Failed to update', 'fa-triangle-exclamation'); }
+};
+// ═══════════ END PRE-EMPLOYMENT CHECKLIST ═══════════
 
     (async function boot() {
   const storedUser = localStorage.getItem('bc_user');

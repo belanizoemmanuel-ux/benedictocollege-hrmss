@@ -114,8 +114,9 @@ const EMPLOYEE_ROUTES = [
   ['POST', /^\/auth\/change-password$/],
   ['GET',  /^\/biometric-photos$/],
   ['GET',  /^\/biometric-photos\/months$/],
-  ['GET',  /^\/compliance\/employee\/[^/]+$/],
-  ['POST', /^\/compliance$/],
+  ['GET',  /^\/checklist\/employee\/[^/]+$/],
+  ['GET',  /^\/checklist\/employee\/[^/]+\/[^/]+\/photo$/],
+  ['POST', /^\/checklist\/employee\/[^/]+\/[^/]+\/photo$/],
 ];
 
 app.use('/api', async (req, res, next) => {
@@ -1707,6 +1708,135 @@ app.post('/api/compliance', async (req, res) => {
     res.status(201).json({ _id: doc._id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ═══════════ PRE-EMPLOYMENT CHECKLIST (replaces Compliance Documents) ═══════════
+const checklistEntrySchema = new mongoose.Schema({
+  employeeId:   { type: String, required: true },
+  employeeName: String,
+  key:          { type: String, required: true },
+  status:       { type: String, enum: ['Submitted', 'NA'], required: true },   // no entry = still missing (blank)
+  photo:        String,
+  updatedBy:    String
+}, { timestamps: true });
+checklistEntrySchema.index({ employeeId: 1, key: 1 }, { unique: true });
+const ChecklistEntry = mongoose.model('ChecklistEntry', checklistEntrySchema);
+
+const ChecklistMeta = mongoose.model('ChecklistMeta', new mongoose.Schema({
+  employeeId: { type: String, required: true, unique: true },
+  dueDate:    String,
+  remarks:    String,
+  requested:  { type: Boolean, default: false }     // true = HR sent the missing list to the employee portal
+}));
+
+const CK_KEY = /^[a-z0-9_]{2,30}$/;
+async function ckActor(req) {
+  const u = await User.findById(req.user.id);
+  return u ? u.name : (isAdmin(req) ? 'HR' : 'Employee');
+}
+async function ckCanAccess(req, employeeId) {
+  return isAdmin(req) || await ownsEmployee(req, employeeId);
+}
+
+// HR: who has what (one row per employee)
+app.get('/api/checklist/summary', async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Admins only' });
+    const [rows, metas] = await Promise.all([
+      ChecklistEntry.aggregate([{ $group: { _id: '$employeeId', done: { $addToSet: '$key' } } }]),
+      ChecklistMeta.find({ requested: true }, { employeeId: 1 }).lean()
+    ]);
+    const out = new Map();
+    rows.forEach(r => out.set(r._id, { employeeId: r._id, done: r.done, requested: false }));
+    metas.forEach(m => {
+      const o = out.get(m.employeeId) || { employeeId: m.employeeId, done: [], requested: false };
+      o.requested = true; out.set(m.employeeId, o);
+    });
+    res.json([...out.values()]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// One employee's checklist (no photos in the list, they load on demand)
+app.get('/api/checklist/employee/:id', async (req, res) => {
+  try {
+    if (!(await ckCanAccess(req, req.params.id))) return res.status(403).json({ error: 'Forbidden' });
+    const entries = await ChecklistEntry.aggregate([
+      { $match: { employeeId: req.params.id } },
+      { $project: { _id: 0, key: 1, status: 1, updatedBy: 1, hasPhoto: { $gt: [{ $strLenCP: { $ifNull: ['$photo', ''] } }, 0] } } }
+    ]);
+    const m = await ChecklistMeta.findOne({ employeeId: req.params.id }).lean();
+    res.json({ entries, meta: { dueDate: (m && m.dueDate) || '', remarks: (m && m.remarks) || '', requested: !!(m && m.requested) } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// HR: due date, remarks, and "send to employee portal"
+app.put('/api/checklist/employee/:id/meta', async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Admins only' });
+    const b = req.body || {}, set = {};
+    if (b.dueDate   !== undefined) set.dueDate   = String(b.dueDate || '').slice(0, 20);
+    if (b.remarks   !== undefined) set.remarks   = String(b.remarks || '').slice(0, 500);
+    if (b.requested !== undefined) set.requested = !!b.requested;
+    const doc = await ChecklistMeta.findOneAndUpdate(
+      { employeeId: req.params.id }, { $set: set },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.json({ dueDate: doc.dueDate || '', remarks: doc.remarks || '', requested: !!doc.requested });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// HR: mark an item Submitted / NA / Missing (Missing = blank, removes the entry)
+app.put('/api/checklist/employee/:id/:key', async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Admins only' });
+    const { id, key } = req.params;
+    const status = (req.body || {}).status;
+    if (!CK_KEY.test(key)) return res.status(400).json({ error: 'Invalid item' });
+    const emp = await Employee.findOne({ id });
+    if (!emp) return res.status(404).json({ error: 'Employee not found' });
+    if (status === 'Missing') {
+      await ChecklistEntry.deleteOne({ employeeId: id, key });
+    } else if (status === 'Submitted' || status === 'NA') {
+      await ChecklistEntry.findOneAndUpdate(
+        { employeeId: id, key },
+        { $set: { employeeId: id, employeeName: `${emp.first} ${emp.last}`, key, status, updatedBy: await ckActor(req) } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } else return res.status(400).json({ error: 'Invalid status' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// View one attached photo
+app.get('/api/checklist/employee/:id/:key/photo', async (req, res) => {
+  try {
+    if (!(await ckCanAccess(req, req.params.id))) return res.status(403).json({ error: 'Forbidden' });
+    const doc = await ChecklistEntry.findOne({ employeeId: req.params.id, key: req.params.key }, { photo: 1 }).lean();
+    res.json({ photo: (doc && doc.photo) || '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Employee (or HR) attaches a photo -> item becomes Submitted
+app.post('/api/checklist/employee/:id/:key/photo', async (req, res) => {
+  try {
+    const { id, key } = req.params;
+    if (!CK_KEY.test(key)) return res.status(400).json({ error: 'Invalid item' });
+    if (!(await ckCanAccess(req, id))) return res.status(403).json({ error: 'Forbidden' });
+    const photo = (req.body || {}).photo;
+    if (typeof photo !== 'string' || !photo.startsWith('data:image/') || photo.length > 12 * 1024 * 1024) {
+      return res.status(400).json({ error: 'Please attach a valid image' });
+    }
+    const emp = await Employee.findOne({ id });
+    if (!emp) return res.status(404).json({ error: 'Employee not found' });
+    await ChecklistEntry.findOneAndUpdate(
+      { employeeId: id, key },
+      { $set: { employeeId: id, employeeName: `${emp.first} ${emp.last}`, key, status: 'Submitted', photo, updatedBy: await ckActor(req) } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    await Activity.create({ icon: 'fa-file-circle-check', text: `${emp.first} ${emp.last} attached a pre-employment document`, when: 'just now' });
+    res.status(201).json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ═══════════ END PRE-EMPLOYMENT CHECKLIST ═══════════
 
 app.listen(PORT, () => {
   console.log(`✅ HR System running on port ${PORT}`);
